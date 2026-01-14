@@ -1339,7 +1339,7 @@ def command_line_demo():
             print()
         
         # Create cipher instance
-        cipher = ParallelWBC1(key, rounds=rounds, block_size=16)
+        cipher = ParallelWBC1(key, block_size=16, num_rounds=rounds)
         
         # Encryption
         if rank == 0:
