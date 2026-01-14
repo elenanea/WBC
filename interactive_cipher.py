@@ -956,7 +956,7 @@ def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_roun
     elif mode_name in parallel_mode_map:
         # Parallel ECB or CTR - all ranks participate
         enc_func = parallel_mode_map[mode_name]
-        decrypted, enc_time, dec_time = enc_func(plaintext, key, 16, num_rounds)
+        decrypted, enc_time, dec_time = enc_func(plaintext, key, block_size, num_rounds)
         if rank == 0:
             ciphertext = b"N/A"  # Not storing full ciphertext for large data
     else:
@@ -1212,6 +1212,7 @@ def main_cmdline(args):
         
         if mode_name in parallel_mode_functions:
             # Parallel ECB or CTR - all ranks participate
+            # All ranks need the plaintext for parallel processing
             plaintext = text.encode('utf-8')
             decrypted, enc_time, dec_time = parallel_mode_functions[mode_name](plaintext, key, block_size, num_rounds)
             if rank == 0:
