@@ -593,12 +593,360 @@ def display_results(original: str, decrypted: bytes, enc_time: float, dec_time: 
     print_separator()
 
 
+def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_rounds: int, data_size_kb: int):
+    """Run statistical analysis and tests on the cipher."""
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    from wbc1_parallel import shannon_entropy, avalanche_test, frequency_test, correlation_test
+    
+    if rank == 0:
+        print()
+        print_separator()
+        print("СТАТИСТИЧЕСКИЙ АНАЛИЗ / STATISTICAL ANALYSIS")
+        print_separator()
+        print(f"Размер данных / Data size: {data_size_kb} KB")
+        print(f"Количество процессов / Processes: {size}")
+        print(f"Размер ключа / Key size: {key_size} bits ({key_size // 8} bytes)")
+        print(f"Режим / Mode: {mode_name}")
+        print(f"Раунды / Rounds: {num_rounds}")
+        print_separator()
+        print()
+        
+        # Generate test data
+        data_size_bytes = data_size_kb * 1024
+        plaintext = bytes([i % 256 for i in range(data_size_bytes)])
+        print(f"Сгенерировано {data_size_bytes} байт тестовых данных")
+        print()
+        
+        # Map mode to function
+        mode_map = {
+            "ECB": encrypt_ecb_mode,
+            "CBC": encrypt_cbc_mode,
+            "CFB": encrypt_cfb_mode,
+            "OFB": encrypt_ofb_mode,
+            "CTR": encrypt_ctr_mode,
+            "WBC-CTR-HMAC": encrypt_wbc_ctr_hmac_mode
+        }
+        
+        block_size = 16
+        
+        if mode_name == "Parallel":
+            # Use parallel mode
+            cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
+            plaintext_bcast = None
+        else:
+            # Use sequential mode
+            enc_func = mode_map.get(mode_name, encrypt_ecb_mode)
+    else:
+        plaintext = None
+        plaintext_bcast = None
+    
+    # Broadcast plaintext for parallel mode
+    if mode_name == "Parallel":
+        plaintext_bcast = comm.bcast(plaintext, root=0)
+    
+    # Perform encryption
+    if rank == 0:
+        print("⏳ Выполняется шифрование...")
+        
+    if mode_name == "Parallel":
+        cipher = ParallelWBC1(key, block_size=16, num_rounds=num_rounds)
+        start_time = time.time()
+        ciphertext = cipher.encrypt(plaintext_bcast if rank == 0 else None)
+        enc_time = time.time() - start_time
+        
+        start_time = time.time()
+        decrypted = cipher.decrypt(ciphertext)
+        dec_time = time.time() - start_time
+    else:
+        if rank == 0:
+            enc_func = mode_map.get(mode_name, encrypt_ecb_mode)
+            decrypted, enc_time, dec_time = enc_func(plaintext, key, 16, num_rounds)
+            ciphertext = b"N/A"  # Not storing full ciphertext for large data
+    
+    if rank == 0:
+        print(f"✓ Шифрование завершено / Encryption completed")
+        print()
+        
+        # Performance metrics
+        print_separator()
+        print("ПРОИЗВОДИТЕЛЬНОСТЬ / PERFORMANCE")
+        print_separator()
+        print(f"Время шифрования / Encryption time:   {enc_time:.6f} сек")
+        print(f"Время расшифрования / Decryption time: {dec_time:.6f} сек")
+        print(f"Общее время / Total time:             {enc_time + dec_time:.6f} сек")
+        
+        throughput_enc = (data_size_kb / enc_time) if enc_time > 0 else 0
+        throughput_dec = (data_size_kb / dec_time) if dec_time > 0 else 0
+        print(f"Пропускная способность (шифр.) / Throughput (enc): {throughput_enc:.2f} KB/s")
+        print(f"Пропускная способность (расш.) / Throughput (dec): {throughput_dec:.2f} KB/s")
+        print_separator()
+        print()
+        
+        # Verify correctness
+        if plaintext == decrypted:
+            print("✓ ВЕРИФИКАЦИЯ ПРОЙДЕНА / VERIFICATION PASSED")
+            print()
+        else:
+            print("✗ ОШИБКА ВЕРИФИКАЦИИ / VERIFICATION FAILED")
+            print()
+        
+        # Statistical tests
+        print_separator()
+        print("СТАТИСТИЧЕСКИЕ ТЕСТЫ / STATISTICAL TESTS")
+        print_separator()
+        
+        # Sample for statistics (use first 10KB max for speed)
+        sample_size = min(10240, len(plaintext))
+        plaintext_sample = plaintext[:sample_size]
+        
+        # For statistical tests, we need actual ciphertext
+        if mode_name != "Parallel":
+            # Already have it from encryption
+            pass
+        
+        # Entropy
+        print(f"\n1. Энтропия Шеннона / Shannon Entropy:")
+        pt_entropy = shannon_entropy(plaintext_sample)
+        print(f"   Открытый текст / Plaintext:  {pt_entropy:.4f} бит/байт")
+        
+        # For ciphertext entropy, encrypt a sample
+        cipher_obj = WBC1Cipher(key, block_size=16, num_rounds=num_rounds)
+        # Pad sample
+        padding_length = 16 - (len(plaintext_sample) % 16)
+        if padding_length == 0:
+            padding_length = 16
+        padded_sample = plaintext_sample + bytes([padding_length] * padding_length)
+        
+        encrypted_blocks = []
+        for i in range(0, len(padded_sample), 16):
+            block = padded_sample[i:i + 16]
+            block_array = np.frombuffer(block, dtype=np.uint8).copy()
+            encrypted_block = cipher_obj.encrypt_block(block_array)
+            encrypted_blocks.append(encrypted_block.tobytes())
+        ciphertext_sample = b''.join(encrypted_blocks)
+        
+        ct_entropy = shannon_entropy(ciphertext_sample)
+        print(f"   Шифртекст / Ciphertext:      {ct_entropy:.4f} бит/байт")
+        print(f"   (Идеально / Ideal: 8.0 бит/байт)")
+        
+        # Frequency test
+        print(f"\n2. Частотный тест / Frequency Test:")
+        freq_stats = frequency_test(ciphertext_sample)
+        print(f"   Среднее / Mean:        {freq_stats['mean']:.2f}")
+        print(f"   Ст. откл. / Std dev:   {freq_stats['std']:.2f}")
+        print(f"   Хи-квадрат / Chi-sq:   {freq_stats['chi_square']:.2f}")
+        
+        # Avalanche effect
+        print(f"\n3. Лавинный эффект / Avalanche Effect:")
+        num_tests = min(100, sample_size // 16)  # Limit for speed
+        avalanche_results = avalanche_test(cipher_obj, num_tests=num_tests)
+        print(f"   Среднее изменение битов / Mean bit flip: {avalanche_results['mean_flip_percentage']:.2f}%")
+        print(f"   Ст. откл. / Std dev:                     {avalanche_results['std_flip_percentage']:.2f}%")
+        print(f"   Диапазон / Range: [{avalanche_results['min_flip_percentage']:.2f}%, {avalanche_results['max_flip_percentage']:.2f}%]")
+        print(f"   (Идеально / Ideal: ~50%)")
+        
+        # Correlation
+        print(f"\n4. Корреляция / Correlation:")
+        corr = correlation_test(plaintext_sample, ciphertext_sample[:len(plaintext_sample)])
+        print(f"   Корреляция открытый-шифр / PT-CT: {corr:.6f}")
+        print(f"   (Идеально / Ideal: ~0.0)")
+        
+        print()
+        print_separator()
+        print("АНАЛИЗ ЗАВЕРШЕН / ANALYSIS COMPLETED")
+        print_separator()
+
+
+def main_cmdline(args):
+    """Main function for command-line mode."""
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    # Parse arguments: mpi_mode key_size key_source mode rounds task [data_size]
+    # mpi_mode: 0 or 1 (not used, MPI determined by mpiexec)
+    # key_size: in bits (e.g., 128, 192, 256)
+    # key_source: 0=auto-generate, 1=user-provided
+    # mode: 1-7 (ECB, CBC, CFB, OFB, CTR, WBC-CTR-HMAC, Parallel)
+    # rounds: number of rounds
+    # task: 0=text encryption, 1=statistical analysis
+    # data_size: size in KB (only for task=1)
+    
+    if len(args) < 6:
+        if rank == 0:
+            print("Usage: python3 interactive_cipher.py <mpi_mode> <key_size> <key_source> <mode> <rounds> <task> [data_size]")
+            print("  mpi_mode: 0 or 1 (placeholder)")
+            print("  key_size: key size in bits (e.g., 128, 192, 256)")
+            print("  key_source: 0=auto-generate, 1=user-provided")
+            print("  mode: 1=ECB, 2=CBC, 3=CFB, 4=OFB, 5=CTR, 6=WBC-CTR-HMAC, 7=Parallel")
+            print("  rounds: number of rounds (e.g., 16, 32, 64)")
+            print("  task: 0=text encryption, 1=statistical analysis")
+            print("  data_size: size in KB (required for task=1)")
+            print()
+            print("Example: mpiexec -n 4 python3 interactive_cipher.py 0 256 0 2 64 0")
+            print("Example: mpiexec -n 4 python3 interactive_cipher.py 0 256 0 2 64 1 1000")
+        return
+    
+    try:
+        mpi_mode = int(args[0])
+        key_size_bits = int(args[1])
+        key_source = int(args[2])
+        mode_num = int(args[3])
+        num_rounds = int(args[4])
+        task = int(args[5])
+        data_size_kb = int(args[6]) if len(args) > 6 else 10
+    except ValueError:
+        if rank == 0:
+            print("Error: Invalid arguments. All must be integers.")
+        return
+    
+    # Map mode number to mode name
+    mode_map_num = {
+        1: "ECB",
+        2: "CBC",
+        3: "CFB",
+        4: "OFB",
+        5: "CTR",
+        6: "WBC-CTR-HMAC",
+        7: "Parallel"
+    }
+    
+    mode_name = mode_map_num.get(mode_num, "ECB")
+    key_size_bytes = key_size_bits // 8
+    
+    # Generate or get key
+    if rank == 0:
+        if key_source == 0:
+            # Auto-generate
+            key = generate_random_key(key_size_bytes)
+            key_source_str = "автоматически сгенерирован / auto-generated"
+        else:
+            # User-provided
+            print("Введите ключ / Enter key:")
+            key_str = input()
+            key = key_str.encode('utf-8')
+            # Pad or truncate to desired size
+            if len(key) < key_size_bytes:
+                key = key + b'\x00' * (key_size_bytes - len(key))
+            elif len(key) > key_size_bytes:
+                key = key[:key_size_bytes]
+            key_source_str = "задан пользователем / user-provided"
+    else:
+        key = None
+        key_source_str = None
+    
+    # Broadcast key
+    key = comm.bcast(key, root=0)
+    key_source_str = comm.bcast(key_source_str, root=0)
+    
+    # Print protocol header
+    if rank == 0:
+        print()
+        print_separator()
+        print("ПРОТОКОЛ ВЫПОЛНЕНИЯ / EXECUTION PROTOCOL")
+        print_separator()
+        print(f"Количество процессов / Number of processes: {size}")
+        print(f"Размер ключа / Key size: {key_size_bits} бит ({key_size_bytes} байт)")
+        print(f"Источник ключа / Key source: {key_source_str}")
+        print(f"Режим выполнения / Execution mode: {mode_name}")
+        print(f"Количество раундов / Number of rounds: {num_rounds}")
+        print(f"Ключ / Key (hex): {key.hex()}")
+        print_separator()
+        print()
+    
+    if task == 0:
+        # Text encryption mode
+        if rank == 0:
+            print("РЕЖИМ ШИФРОВАНИЯ ТЕКСТА / TEXT ENCRYPTION MODE")
+            print()
+            print("Введите текст для шифрования:")
+            print("Enter text to encrypt:")
+            text = input()
+            print()
+        else:
+            text = None
+        
+        # Broadcast text
+        text = comm.bcast(text, root=0)
+        
+        if rank == 0:
+            print(f"Введенный текст / Input text: {text}")
+            print()
+            print("⏳ Выполняется шифрование / Encrypting...")
+        
+        # Encrypt
+        block_size = 16
+        mode_functions = {
+            "ECB": encrypt_ecb_mode,
+            "CBC": encrypt_cbc_mode,
+            "CFB": encrypt_cfb_mode,
+            "OFB": encrypt_ofb_mode,
+            "CTR": encrypt_ctr_mode,
+            "WBC-CTR-HMAC": encrypt_wbc_ctr_hmac_mode
+        }
+        
+        if mode_name in mode_functions:
+            if rank == 0:
+                plaintext = text.encode('utf-8')
+                decrypted, enc_time, dec_time = mode_functions[mode_name](plaintext, key, block_size, num_rounds)
+                ciphertext = b"<encrypted>"  # We don't need full ciphertext display
+        elif mode_name == "Parallel":
+            cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
+            if rank == 0:
+                plaintext = text.encode('utf-8')
+            else:
+                plaintext = None
+            
+            start_time = time.time()
+            ciphertext = cipher.encrypt(plaintext)
+            enc_time = time.time() - start_time
+            
+            start_time = time.time()
+            decrypted = cipher.decrypt(ciphertext)
+            dec_time = time.time() - start_time
+        
+        # Display results
+        if rank == 0:
+            print()
+            print_separator()
+            print("РЕЗУЛЬТАТЫ / RESULTS")
+            print_separator()
+            print(f"Зашифрованный текст / Encrypted text (hex): {ciphertext[:64].hex() if isinstance(ciphertext, bytes) and len(ciphertext) > 0 else 'N/A'}...")
+            print(f"Расшифрованный текст / Decrypted text: {decrypted.decode('utf-8', errors='replace')}")
+            print()
+            print(f"Время шифрования / Encryption time:   {enc_time:.6f} сек")
+            print(f"Время расшифрования / Decryption time: {dec_time:.6f} сек")
+            print()
+            
+            if text == decrypted.decode('utf-8', errors='replace'):
+                print("✓ УСПЕХ: Расшифровка совпадает с оригиналом!")
+                print("✓ SUCCESS: Decryption matches original!")
+            else:
+                print("✗ ОШИБКА: Расшифровка не совпадает!")
+                print("✗ ERROR: Decryption mismatch!")
+            print_separator()
+    
+    elif task == 1:
+        # Statistical analysis mode
+        run_statistical_analysis(key, key_size_bits, mode_name, num_rounds, data_size_kb)
+
+
 def main():
     """Main interactive program."""
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
     
+    # Check if command-line arguments are provided
+    if len(sys.argv) > 1:
+        # Command-line mode
+        main_cmdline(sys.argv[1:])
+        return
+    
+    # Interactive mode (original behavior)
     # Only master process handles user interaction
     if rank == 0:
         print_header()
