@@ -921,5 +921,273 @@ def main():
         print(f"  (Ideal avalanche effect is around 50%)")
 
 
+def interactive_demo():
+    """
+    Interactive demonstration of WBC1 cipher with hardcoded text.
+    User can select key, rounds, and encryption mode interactively.
+    """
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    
+    # Hardcoded demonstration text
+    DEMO_TEXT = "This is a demonstration of the WBC1 parallel cipher with dynamic Rubik's cube permutation operations!"
+    
+    if rank == 0:
+        print("=" * 70)
+        print("   ИНТЕРАКТИВНАЯ ДЕМОНСТРАЦИЯ WBC1 / Interactive WBC1 Demo")
+        print("=" * 70)
+        print()
+        print(f"Демонстрационный текст / Demo text:")
+        print(f"  '{DEMO_TEXT}'")
+        print()
+        print("=" * 70)
+        print()
+        
+        # Get key selection
+        print("1. ВЫБОР КЛЮЧА / KEY SELECTION")
+        print()
+        print("  1) Ввести свой ключ (Enter custom key)")
+        print("  2) Сгенерировать автоматически (Generate automatically)")
+        print()
+        
+        choice = input("  Ваш выбор / Your choice (1/2): ").strip()
+        print(f"  ✓ Выбрано / Selected: {choice}")
+        print()
+        
+        if choice == "1":
+            key_str = input("  Введите ключ / Enter key: ")
+            print(f"  ✓ Ключ введён / Key entered: {key_str[:20]}{'...' if len(key_str) > 20 else ''}")
+            print()
+            key = key_str.encode('utf-8')
+            key_source = "пользовательский / user-provided"
+        else:
+            print("2. ДЛИНА КЛЮЧА / KEY LENGTH")
+            print()
+            print("  Рекомендуемые значения / Recommended values:")
+            print("  1) 16 байт (128 бит) / 16 bytes (128 bits)")
+            print("  2) 24 байта (192 бита) / 24 bytes (192 bits)")
+            print("  3) 32 байта (256 бит) / 32 bytes (256 bits)")
+            print("  4) Другая длина / Custom")
+            print()
+            
+            length_choice = input("  Ваш выбор / Your choice (1-4): ").strip()
+            print(f"  ✓ Выбрано / Selected: {length_choice}")
+            print()
+            
+            if length_choice == "1":
+                length = 16
+            elif length_choice == "2":
+                length = 24
+            elif length_choice == "3":
+                length = 32
+            else:
+                try:
+                    length = int(input("  Введите длину ключа в байтах / Enter key length in bytes: "))
+                    print(f"  ✓ Введено / Entered: {length} байт / bytes")
+                    print()
+                    if length < 8:
+                        print("  ⚠ Предупреждение: длина меньше 8 байт небезопасна!")
+                        print("  ⚠ Warning: length less than 8 bytes is insecure!")
+                        length = max(8, length)
+                except ValueError:
+                    print("  ⚠ Некорректный ввод, используется 16 байт")
+                    print("  ⚠ Invalid input, using 16 bytes")
+                    length = 16
+            
+            import secrets
+            key = secrets.token_bytes(length)
+            key_source = f"сгенерирован / generated ({length} байт / bytes)"
+        
+        # Get rounds
+        print("=" * 70)
+        print()
+        print("3. КОЛИЧЕСТВО РАУНДОВ / NUMBER OF ROUNDS")
+        print()
+        print("  Рекомендуемые значения / Recommended values:")
+        print("  1) 10 раундов (быстрее / faster)")
+        print("  2) 16 раундов (рекомендуется / recommended)")
+        print("  3) 20 раундов (медленнее, безопаснее / slower, more secure)")
+        print("  4) 32 раунда (максимальная безопасность / maximum security)")
+        print("  5) Другое значение / Custom")
+        print()
+        
+        rounds_choice = input("  Ваш выбор / Your choice (1-5): ").strip()
+        print(f"  ✓ Выбрано / Selected: {rounds_choice}")
+        print()
+        
+        if rounds_choice == "1":
+            num_rounds = 10
+        elif rounds_choice == "2":
+            num_rounds = 16
+        elif rounds_choice == "3":
+            num_rounds = 20
+        elif rounds_choice == "4":
+            num_rounds = 32
+        else:
+            try:
+                num_rounds = int(input("  Введите количество раундов / Enter number of rounds: "))
+                print(f"  ✓ Введено / Entered: {num_rounds} раундов / rounds")
+                print()
+                num_rounds = max(1, num_rounds)
+            except ValueError:
+                print("  ⚠ Некорректный ввод, используется 16 раундов")
+                print("  ⚠ Invalid input, using 16 rounds")
+                num_rounds = 16
+        
+        # Get mode
+        print("=" * 70)
+        print()
+        print("4. РЕЖИМ ШИФРОВАНИЯ / ENCRYPTION MODE")
+        print()
+        print("  1) ECB (Electronic Codebook) - Параллельный / Parallel")
+        print("  2) CBC (Cipher Block Chaining)")
+        print("  3) CFB (Cipher Feedback)")
+        print("  4) OFB (Output Feedback)")
+        print("  5) CTR (Counter mode) - Параллельный / Parallel")
+        print("  6) Parallel MPI (полное параллельное шифрование / full parallel encryption)")
+        print()
+        
+        mode_choice = input("  Ваш выбор / Your choice (1-6): ").strip()
+        print(f"  ✓ Выбрано / Selected: {mode_choice}")
+        print()
+        
+        mode_map = {
+            "1": "ECB",
+            "2": "CBC",
+            "3": "CFB",
+            "4": "OFB",
+            "5": "CTR",
+            "6": "Parallel"
+        }
+        
+        mode = mode_map.get(mode_choice, "ECB")
+        
+        # Summary
+        print("=" * 70)
+        print("ПАРАМЕТРЫ ШИФРОВАНИЯ / ENCRYPTION PARAMETERS")
+        print("=" * 70)
+        print(f"Текст / Text: {DEMO_TEXT[:50]}...")
+        print(f"Длина текста / Text length: {len(DEMO_TEXT)} символов / characters")
+        print(f"Ключ / Key: {key_source}")
+        print(f"Длина ключа / Key length: {len(key)} байт / bytes ({len(key)*8} бит / bits)")
+        print(f"Ключ (hex): {key.hex()[:40]}...")
+        print(f"Количество раундов / Rounds: {num_rounds}")
+        print(f"Режим / Mode: {mode}")
+        print("=" * 70)
+        print()
+        
+        sys.stdout.flush()
+    else:
+        # Non-root processes wait for parameters
+        key = None
+        num_rounds = None
+        mode = None
+    
+    # Broadcast parameters to all processes
+    key = comm.bcast(key, root=0)
+    num_rounds = comm.bcast(num_rounds, root=0)
+    mode = comm.bcast(mode, root=0)
+    
+    # Run encryption based on mode
+    if rank == 0:
+        print("⏳ Выполняется шифрование / Encrypting...")
+        print()
+    
+    plaintext = DEMO_TEXT.encode('utf-8')
+    
+    if mode == "Parallel":
+        # Use parallel cipher
+        parallel_cipher = ParallelWBC1(key, block_size=16, num_rounds=num_rounds)
+        
+        if rank == 0:
+            start_time = time.time()
+        
+        ciphertext = parallel_cipher.encrypt(plaintext if rank == 0 else None)
+        
+        comm.Barrier()
+        
+        if rank == 0:
+            enc_time = time.time() - start_time
+            
+            start_time = time.time()
+        
+        decrypted = parallel_cipher.decrypt(ciphertext if rank == 0 else None)
+        
+        comm.Barrier()
+        
+        if rank == 0:
+            dec_time = time.time() - start_time
+    else:
+        # Use sequential cipher (only rank 0)
+        if rank == 0:
+            cipher = WBC1Cipher(key, block_size=16, num_rounds=num_rounds)
+            
+            # Pad data
+            block_size = 16
+            padding_length = block_size - (len(plaintext) % block_size)
+            if padding_length == 0:
+                padding_length = block_size
+            padded_data = plaintext + bytes([padding_length] * padding_length)
+            
+            # Encrypt
+            start_time = time.time()
+            encrypted_blocks = []
+            for i in range(0, len(padded_data), block_size):
+                block = padded_data[i:i + block_size]
+                block_array = np.frombuffer(block, dtype=np.uint8).copy()
+                encrypted_block = cipher.encrypt_block(block_array)
+                encrypted_blocks.append(encrypted_block.tobytes())
+            ciphertext = b''.join(encrypted_blocks)
+            enc_time = time.time() - start_time
+            
+            # Decrypt
+            start_time = time.time()
+            decrypted_blocks = []
+            for i in range(0, len(ciphertext), block_size):
+                block = ciphertext[i:i + block_size]
+                block_array = np.frombuffer(block, dtype=np.uint8).copy()
+                decrypted_block = cipher.decrypt_block(block_array)
+                decrypted_blocks.append(decrypted_block.tobytes())
+            decrypted_padded = b''.join(decrypted_blocks)
+            
+            # Remove padding
+            padding_length = decrypted_padded[-1]
+            decrypted = decrypted_padded[:-padding_length]
+            dec_time = time.time() - start_time
+        
+        comm.Barrier()
+    
+    # Display results
+    if rank == 0:
+        print("✅ РЕЗУЛЬТАТЫ / RESULTS")
+        print("=" * 70)
+        print()
+        print(f"Исходный текст / Original text:")
+        print(f"  {DEMO_TEXT}")
+        print()
+        print(f"Зашифрованный текст (hex) / Encrypted text (hex):")
+        print(f"  {ciphertext.hex()[:80]}...")
+        print()
+        print(f"Расшифрованный текст / Decrypted text:")
+        print(f"  {decrypted.decode('utf-8')}")
+        print()
+        print(f"Проверка / Verification:")
+        if decrypted.decode('utf-8') == DEMO_TEXT:
+            print(f"  ✅ Успешно! Расшифровка совпадает с оригиналом")
+            print(f"  ✅ Success! Decryption matches original")
+        else:
+            print(f"  ❌ Ошибка! Расшифровка не совпадает")
+            print(f"  ❌ Error! Decryption does not match")
+        print()
+        print(f"Время шифрования / Encryption time: {enc_time:.6f} сек / sec")
+        print(f"Время расшифрования / Decryption time: {dec_time:.6f} сек / sec")
+        print()
+        print("=" * 70)
+
+
 if __name__ == "__main__":
-    main()
+    # Check if running in interactive mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--interactive":
+        interactive_demo()
+    else:
+        main()
