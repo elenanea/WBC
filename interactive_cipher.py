@@ -1146,7 +1146,16 @@ def main_cmdline(args):
             print("Введите текст для шифрования:")
             print("Enter text to encrypt:")
             sys.stdout.flush()  # Ensure output is displayed before input
-            text = input()
+            
+            # Read input with proper error handling for MPI environment
+            try:
+                text = sys.stdin.readline().rstrip('\n')
+                if not text:
+                    text = input()  # Fallback to input() if readline doesn't work
+            except (EOFError, IOError):
+                print("⚠ Warning: Could not read from stdin, using fallback")
+                text = "Default test text"
+            
             print()
             print(f"[DEBUG rank {rank}] After input, text length: {len(text)}")
             sys.stdout.flush()
