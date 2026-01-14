@@ -513,6 +513,290 @@ def encrypt_wbc_ctr_hmac_mode(plaintext: bytes, key: bytes, block_size: int, num
     return decrypted, encryption_time, decryption_time
 
 
+def parallel_encrypt_ecb_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[bytes, float, float]:
+    """Encrypt using parallel ECB mode - distributes blocks across MPI processes."""
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    cipher = WBC1Cipher(key, block_size=block_size, num_rounds=num_rounds)
+    
+    # Rank 0 prepares data
+    if rank == 0:
+        # Pad data
+        padding_length = block_size - (len(plaintext) % block_size)
+        if padding_length == 0:
+            padding_length = block_size
+        padded_data = plaintext + bytes([padding_length] * padding_length)
+        
+        # Split into blocks
+        num_blocks = len(padded_data) // block_size
+        blocks = [padded_data[i*block_size:(i+1)*block_size] for i in range(num_blocks)]
+    else:
+        blocks = None
+        num_blocks = None
+    
+    # Broadcast number of blocks
+    num_blocks = comm.bcast(num_blocks, root=0)
+    
+    # Scatter blocks to processes
+    local_blocks = []
+    for i in range(num_blocks):
+        if rank == 0:
+            block_to_send = blocks[i] if i < len(blocks) else None
+        else:
+            block_to_send = None
+        
+        # Determine which rank should get this block (round-robin)
+        target_rank = i % size
+        if rank == target_rank:
+            received_block = comm.bcast(block_to_send, root=0)
+            if received_block:
+                local_blocks.append(received_block)
+        else:
+            comm.bcast(block_to_send, root=0)
+    
+    # Each process encrypts its blocks
+    comm.Barrier()
+    start_time = time.time()
+    local_encrypted = []
+    for block in local_blocks:
+        block_array = np.frombuffer(block, dtype=np.uint8).copy()
+        encrypted_block = cipher.encrypt_block(block_array)
+        local_encrypted.append(encrypted_block.tobytes())
+    
+    # Gather encrypted blocks
+    all_encrypted = comm.gather(local_encrypted, root=0)
+    
+    if rank == 0:
+        # Reconstruct ciphertext in correct order
+        encrypted_blocks = [None] * num_blocks
+        for proc_rank, proc_blocks in enumerate(all_encrypted):
+            block_idx = proc_rank
+            for block in proc_blocks:
+                encrypted_blocks[block_idx] = block
+                block_idx += size
+        ciphertext = b''.join(encrypted_blocks)
+        encryption_time = time.time() - start_time
+    else:
+        ciphertext = None
+        encryption_time = None
+    
+    comm.Barrier()
+    
+    # Broadcast ciphertext and time for decryption
+    ciphertext = comm.bcast(ciphertext, root=0)
+    encryption_time = comm.bcast(encryption_time, root=0)
+    
+    # Parallel decryption (same approach)
+    if rank == 0:
+        num_blocks = len(ciphertext) // block_size
+        blocks = [ciphertext[i*block_size:(i+1)*block_size] for i in range(num_blocks)]
+    else:
+        num_blocks = None
+        blocks = None
+    
+    num_blocks = comm.bcast(num_blocks, root=0)
+    
+    # Scatter blocks for decryption
+    local_blocks = []
+    for i in range(num_blocks):
+        if rank == 0:
+            block_to_send = blocks[i] if i < len(blocks) else None
+        else:
+            block_to_send = None
+        
+        target_rank = i % size
+        if rank == target_rank:
+            received_block = comm.bcast(block_to_send, root=0)
+            if received_block:
+                local_blocks.append(received_block)
+        else:
+            comm.bcast(block_to_send, root=0)
+    
+    # Each process decrypts its blocks
+    comm.Barrier()
+    start_time = time.time()
+    local_decrypted = []
+    for block in local_blocks:
+        block_array = np.frombuffer(block, dtype=np.uint8).copy()
+        decrypted_block = cipher.decrypt_block(block_array)
+        local_decrypted.append(decrypted_block.tobytes())
+    
+    # Gather decrypted blocks
+    all_decrypted = comm.gather(local_decrypted, root=0)
+    
+    if rank == 0:
+        # Reconstruct plaintext in correct order
+        decrypted_blocks = [None] * num_blocks
+        for proc_rank, proc_blocks in enumerate(all_decrypted):
+            block_idx = proc_rank
+            for block in proc_blocks:
+                decrypted_blocks[block_idx] = block
+                block_idx += size
+        decrypted_padded = b''.join(decrypted_blocks)
+        
+        # Remove padding
+        padding_length = decrypted_padded[-1]
+        decrypted = decrypted_padded[:-padding_length]
+        decryption_time = time.time() - start_time
+    else:
+        decrypted = None
+        decryption_time = None
+    
+    comm.Barrier()
+    
+    # Broadcast results
+    decrypted = comm.bcast(decrypted, root=0)
+    decryption_time = comm.bcast(decryption_time, root=0)
+    
+    return decrypted, encryption_time, decryption_time
+
+
+def parallel_encrypt_ctr_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[bytes, float, float]:
+    """Encrypt using parallel CTR mode - distributes counter blocks across MPI processes."""
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    cipher = WBC1Cipher(key, block_size=block_size, num_rounds=num_rounds)
+    
+    # Rank 0 prepares data
+    if rank == 0:
+        # Generate nonce
+        nonce = secrets.token_bytes(block_size // 2)
+        data_len = len(plaintext)
+        num_blocks = (data_len + block_size - 1) // block_size
+    else:
+        nonce = None
+        data_len = None
+        num_blocks = None
+        plaintext = None
+    
+    # Broadcast parameters
+    nonce = comm.bcast(nonce, root=0)
+    data_len = comm.bcast(data_len, root=0)
+    num_blocks = comm.bcast(num_blocks, root=0)
+    plaintext = comm.bcast(plaintext, root=0)
+    
+    # Each process generates keystream for its assigned counters
+    comm.Barrier()
+    start_time = time.time()
+    
+    local_keystream_blocks = []
+    for i in range(num_blocks):
+        if i % size == rank:
+            # This process handles this counter
+            counter = i.to_bytes(block_size // 2, 'big')
+            counter_block = nonce + counter
+            counter_array = np.frombuffer(counter_block, dtype=np.uint8).copy()
+            keystream_block = cipher.encrypt_block(counter_array)
+            local_keystream_blocks.append((i, keystream_block.tobytes()))
+    
+    # Gather all keystream blocks
+    all_keystream = comm.gather(local_keystream_blocks, root=0)
+    
+    if rank == 0:
+        # Reconstruct keystream in correct order
+        keystream_blocks = {}
+        for proc_blocks in all_keystream:
+            for idx, block in proc_blocks:
+                keystream_blocks[idx] = block
+        
+        # XOR with plaintext
+        encrypted_data = []
+        for i in range(num_blocks):
+            start = i * block_size
+            end = min(start + block_size, data_len)
+            plaintext_block = plaintext[start:end]
+            keystream_block = keystream_blocks[i][:len(plaintext_block)]
+            
+            plaintext_array = np.frombuffer(plaintext_block, dtype=np.uint8).copy()
+            keystream_array = np.frombuffer(keystream_block, dtype=np.uint8).copy()
+            encrypted_block = (plaintext_array ^ keystream_array).tobytes()
+            encrypted_data.append(encrypted_block)
+        
+        ciphertext_data = b''.join(encrypted_data)
+        ciphertext = nonce + ciphertext_data
+        encryption_time = time.time() - start_time
+    else:
+        ciphertext = None
+        encryption_time = None
+    
+    comm.Barrier()
+    
+    # Broadcast for decryption
+    ciphertext = comm.bcast(ciphertext, root=0)
+    encryption_time = comm.bcast(encryption_time, root=0)
+    
+    # Parallel decryption (same keystream generation)
+    if rank == 0:
+        nonce_received = ciphertext[:block_size // 2]
+        ciphertext_data = ciphertext[block_size // 2:]
+        data_len = len(ciphertext_data)
+        num_blocks = (data_len + block_size - 1) // block_size
+    else:
+        nonce_received = None
+        ciphertext_data = None
+        data_len = None
+        num_blocks = None
+    
+    nonce_received = comm.bcast(nonce_received, root=0)
+    ciphertext_data = comm.bcast(ciphertext_data, root=0)
+    data_len = comm.bcast(data_len, root=0)
+    num_blocks = comm.bcast(num_blocks, root=0)
+    
+    # Each process generates keystream for decryption
+    comm.Barrier()
+    start_time = time.time()
+    
+    local_keystream_blocks = []
+    for i in range(num_blocks):
+        if i % size == rank:
+            counter = i.to_bytes(block_size // 2, 'big')
+            counter_block = nonce_received + counter
+            counter_array = np.frombuffer(counter_block, dtype=np.uint8).copy()
+            keystream_block = cipher.encrypt_block(counter_array)
+            local_keystream_blocks.append((i, keystream_block.tobytes()))
+    
+    # Gather all keystream blocks
+    all_keystream = comm.gather(local_keystream_blocks, root=0)
+    
+    if rank == 0:
+        # Reconstruct keystream
+        keystream_blocks = {}
+        for proc_blocks in all_keystream:
+            for idx, block in proc_blocks:
+                keystream_blocks[idx] = block
+        
+        # XOR with ciphertext
+        decrypted_data = []
+        for i in range(num_blocks):
+            start = i * block_size
+            end = min(start + block_size, data_len)
+            ciphertext_block = ciphertext_data[start:end]
+            keystream_block = keystream_blocks[i][:len(ciphertext_block)]
+            
+            ciphertext_array = np.frombuffer(ciphertext_block, dtype=np.uint8).copy()
+            keystream_array = np.frombuffer(keystream_block, dtype=np.uint8).copy()
+            decrypted_block = (ciphertext_array ^ keystream_array).tobytes()
+            decrypted_data.append(decrypted_block)
+        
+        decrypted = b''.join(decrypted_data)
+        decryption_time = time.time() - start_time
+    else:
+        decrypted = None
+        decryption_time = None
+    
+    comm.Barrier()
+    
+    # Broadcast results
+    decrypted = comm.bcast(decrypted, root=0)
+    decryption_time = comm.bcast(decryption_time, root=0)
+    
+    return decrypted, encryption_time, decryption_time
+
+
 def encrypt_parallel_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[Optional[bytes], float, float]:
     """Encrypt using parallel MPI mode."""
     comm = MPI.COMM_WORLD
@@ -621,12 +905,15 @@ def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_roun
         print()
         
         # Map mode to function
-        mode_map = {
-            "ECB": encrypt_ecb_mode,
+        parallel_mode_map = {
+            "ECB": parallel_encrypt_ecb_mode,
+            "CTR": parallel_encrypt_ctr_mode,
+        }
+        
+        sequential_mode_map = {
             "CBC": encrypt_cbc_mode,
             "CFB": encrypt_cfb_mode,
             "OFB": encrypt_ofb_mode,
-            "CTR": encrypt_ctr_mode,
             "WBC-CTR-HMAC": encrypt_wbc_ctr_hmac_mode
         }
         
@@ -636,16 +923,22 @@ def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_roun
             # Use parallel mode
             cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
             plaintext_bcast = None
+        elif mode_name in parallel_mode_map:
+            # Parallel ECB or CTR
+            enc_func = parallel_mode_map[mode_name]
         else:
             # Use sequential mode
-            enc_func = mode_map.get(mode_name, encrypt_ecb_mode)
+            enc_func = sequential_mode_map.get(mode_name, encrypt_cbc_mode)
     else:
         plaintext = None
         plaintext_bcast = None
     
-    # Broadcast plaintext for parallel mode
+    # Broadcast plaintext for parallel modes
     if mode_name == "Parallel":
         plaintext_bcast = comm.bcast(plaintext, root=0)
+    elif mode_name in ["ECB", "CTR"]:
+        # For parallel ECB/CTR, broadcast plaintext to all ranks
+        plaintext = comm.bcast(plaintext, root=0)
     
     # Perform encryption
     if rank == 0:
@@ -660,11 +953,27 @@ def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_roun
         start_time = time.time()
         decrypted = cipher.decrypt(ciphertext)
         dec_time = time.time() - start_time
-    else:
+    elif mode_name in parallel_mode_map:
+        # Parallel ECB or CTR - all ranks participate
+        enc_func = parallel_mode_map[mode_name]
+        decrypted, enc_time, dec_time = enc_func(plaintext, key, 16, num_rounds)
         if rank == 0:
-            enc_func = mode_map.get(mode_name, encrypt_ecb_mode)
+            ciphertext = b"N/A"  # Not storing full ciphertext for large data
+    else:
+        # Sequential modes - only rank 0
+        if rank == 0:
+            enc_func = sequential_mode_map.get(mode_name, encrypt_cbc_mode)
             decrypted, enc_time, dec_time = enc_func(plaintext, key, 16, num_rounds)
             ciphertext = b"N/A"  # Not storing full ciphertext for large data
+        else:
+            decrypted = None
+            enc_time = None
+            dec_time = None
+        # Synchronize
+        comm.Barrier()
+        decrypted = comm.bcast(decrypted, root=0)
+        enc_time = comm.bcast(enc_time, root=0)
+        dec_time = comm.bcast(dec_time, root=0)
     
     if rank == 0:
         print(f"✓ Шифрование завершено / Encryption completed")
@@ -880,25 +1189,52 @@ def main_cmdline(args):
         
         # Encrypt
         block_size = 16
-        mode_functions = {
-            "ECB": encrypt_ecb_mode,
+        
+        # Initialize variables for all ranks to avoid scoping issues
+        ciphertext = None
+        decrypted = None
+        enc_time = 0.0
+        dec_time = 0.0
+        
+        # Parallel modes that use all MPI processes
+        parallel_mode_functions = {
+            "ECB": parallel_encrypt_ecb_mode,
+            "CTR": parallel_encrypt_ctr_mode,
+        }
+        
+        # Sequential modes that run on rank 0 only
+        sequential_mode_functions = {
             "CBC": encrypt_cbc_mode,
             "CFB": encrypt_cfb_mode,
             "OFB": encrypt_ofb_mode,
-            "CTR": encrypt_ctr_mode,
             "WBC-CTR-HMAC": encrypt_wbc_ctr_hmac_mode
         }
         
-        if mode_name in mode_functions:
+        if mode_name in parallel_mode_functions:
+            # Parallel ECB or CTR - all ranks participate
+            plaintext = text.encode('utf-8')
+            decrypted, enc_time, dec_time = parallel_mode_functions[mode_name](plaintext, key, block_size, num_rounds)
+            if rank == 0:
+                ciphertext = b"<encrypted>"  # Placeholder for display
+        elif mode_name in sequential_mode_functions:
             # Sequential modes - only rank 0 does the work
             if rank == 0:
                 plaintext = text.encode('utf-8')
-                decrypted, enc_time, dec_time = mode_functions[mode_name](plaintext, key, block_size, num_rounds)
+                decrypted, enc_time, dec_time = sequential_mode_functions[mode_name](plaintext, key, block_size, num_rounds)
                 ciphertext = b"<encrypted>"  # We don't need full ciphertext display
+            else:
+                # Other ranks wait
+                decrypted = None
+                enc_time = None
+                dec_time = None
             # Synchronize all processes
             comm.Barrier()
+            # Broadcast results to all ranks for consistency
+            decrypted = comm.bcast(decrypted, root=0)
+            enc_time = comm.bcast(enc_time, root=0)
+            dec_time = comm.bcast(dec_time, root=0)
         elif mode_name == "Parallel":
-            # Parallel mode - all ranks participate
+            # Parallel MPI mode - all ranks participate
             cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
             if rank == 0:
                 plaintext = text.encode('utf-8')
@@ -912,6 +1248,9 @@ def main_cmdline(args):
             start_time = time.time()
             decrypted = cipher.decrypt(ciphertext)
             dec_time = time.time() - start_time
+            
+            # Synchronize after parallel mode
+            comm.Barrier()
         
         # Display results - only rank 0
         if rank == 0:
