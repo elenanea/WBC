@@ -1236,9 +1236,189 @@ def interactive_demo():
         print("=" * 70)
 
 
+def command_line_demo():
+    """
+    Command-line demo mode with hardcoded text.
+    Usage: mpiexec -n 4 python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task>
+    
+    Parameters:
+        mpi_mode: 0 or 1 (placeholder, not used)
+        key_size: Key size in bits (128, 192, 256, etc.)
+        key_source: 0=auto-generate, 1=user-provided
+        rounds: Number of encryption rounds
+        task: 0=text encryption (always uses parallel mode)
+    """
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    # Hardcoded demo text
+    demo_text = "This is a demonstration of the WBC1 parallel cipher with dynamic Rubik's cube permutation operations. The algorithm uses 127 unique key-dependent operations for enhanced cryptographic security!"
+    
+    try:
+        # Parse command-line arguments
+        if len(sys.argv) < 6:
+            if rank == 0:
+                print("Error: Insufficient arguments")
+                print()
+                print("Usage: mpiexec -n <processes> python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task>")
+                print()
+                print("Parameters:")
+                print("  mpi_mode:   0 or 1 (placeholder)")
+                print("  key_size:   Key size in bits (128, 192, 256, etc.)")
+                print("  key_source: 0=auto-generate, 1=user-provided")
+                print("  rounds:     Number of encryption rounds")
+                print("  task:       0=text encryption with parallel mode")
+                print()
+                print("Example:")
+                print("  mpiexec --oversubscribe --allow-run-as-root -n 4 python3 wbc1_parallel.py 0 256 0 64 0")
+                sys.stdout.flush()
+            return
+        
+        mpi_mode = int(sys.argv[1])
+        key_size_bits = int(sys.argv[2])
+        key_source = int(sys.argv[3])
+        rounds = int(sys.argv[4])
+        task = int(sys.argv[5])
+        
+        key_size = key_size_bits // 8
+        
+        if task != 0:
+            if rank == 0:
+                print("Error: Only task=0 (text encryption) is supported in command-line mode")
+                print("Use interactive_cipher.py for statistical analysis (task=1)")
+                sys.stdout.flush()
+            return
+        
+        # Print protocol
+        if rank == 0:
+            print("=" * 70)
+            print("ПРОТОКОЛ ВЫПОЛНЕНИЯ / EXECUTION PROTOCOL")
+            print("=" * 70)
+            print(f"Количество процессов / Number of processes: {size}")
+            print(f"Размер ключа / Key size: {key_size_bits} бит ({key_size} байт)")
+            print(f"Источник ключа / Key source: {'пользовательский / user-provided' if key_source == 1 else 'автоматически сгенерирован / auto-generated'}")
+            print(f"Режим выполнения / Execution mode: Parallel MPI")
+            print(f"Количество раундов / Number of rounds: {rounds}")
+        
+        # Generate or get key
+        if key_source == 1:
+            if rank == 0:
+                print()
+                print("Введите ключ шифрования (hex) / Enter encryption key (hex):")
+                sys.stdout.flush()
+                try:
+                    key_hex = sys.stdin.readline().strip()
+                    if not key_hex:
+                        print("Ошибка ввода, используется автогенерация / Input error, using auto-generation")
+                        key = None
+                    else:
+                        key = bytes.fromhex(key_hex)
+                        if len(key) != key_size:
+                            print(f"Предупреждение: длина ключа {len(key)} != {key_size}, корректируется / Warning: key length adjusted")
+                            if len(key) < key_size:
+                                key = key + b'\x00' * (key_size - len(key))
+                            else:
+                                key = key[:key_size]
+                except Exception as e:
+                    print(f"Ошибка при чтении ключа, используется автогенерация / Key input error, using auto-generation")
+                    key = None
+            else:
+                key = None
+            
+            key = comm.bcast(key, root=0)
+        else:
+            key = None
+        
+        if key is None:
+            key = np.random.bytes(key_size)
+        
+        if rank == 0:
+            print(f"Ключ / Key (hex): {key.hex()}")
+            print("=" * 70)
+            print()
+        
+        # Create cipher instance
+        cipher = ParallelWBC1(key, rounds=rounds, block_size=16)
+        
+        # Encryption
+        if rank == 0:
+            print("РЕЖИМ ШИФРОВАНИЯ ТЕКСТА / TEXT ENCRYPTION MODE")
+            print()
+            print(f"Демонстрационный текст / Demo text:")
+            print(f"  '{demo_text}'")
+            print()
+            print("⏳ Выполняется шифрование / Encrypting...")
+            sys.stdout.flush()
+        
+        plaintext = demo_text.encode('utf-8')
+        
+        import time
+        start_enc = time.time()
+        ciphertext = cipher.encrypt(plaintext)
+        end_enc = time.time()
+        
+        if rank == 0:
+            print()
+            print(f"✓ Зашифровано / Encrypted: {len(ciphertext)} байт")
+            print(f"  Шифротекст (hex, первые 80 символов) / Ciphertext (hex, first 80 chars):")
+            print(f"  {ciphertext.hex()[:80]}...")
+            print(f"  Время шифрования / Encryption time: {end_enc - start_enc:.6f} сек")
+            print()
+            print("⏳ Выполняется расшифровка / Decrypting...")
+            sys.stdout.flush()
+        
+        # Decryption
+        start_dec = time.time()
+        decrypted = cipher.decrypt(ciphertext)
+        end_dec = time.time()
+        
+        if rank == 0:
+            print()
+            print(f"✓ Расшифровано / Decrypted: {len(decrypted)} байт")
+            
+            try:
+                decrypted_text = decrypted.decode('utf-8')
+                print(f"  Расшифрованный текст / Decrypted text:")
+                print(f"  '{decrypted_text}'")
+            except:
+                print(f"  Расшифрованный текст (hex) / Decrypted text (hex):")
+                print(f"  {decrypted.hex()}")
+            
+            print(f"  Время расшифровки / Decryption time: {end_dec - start_dec:.6f} сек")
+            print()
+            
+            # Verification
+            if decrypted == plaintext:
+                print("✓ ПРОВЕРКА ПРОЙДЕНА: расшифрованный текст совпадает с оригиналом")
+                print("✓ VERIFICATION PASSED: decrypted text matches original")
+            else:
+                print("✗ ОШИБКА: расшифрованный текст не совпадает с оригиналом")
+                print("✗ ERROR: decrypted text does not match original")
+            
+            print()
+            print("=" * 70)
+            sys.stdout.flush()
+    
+    except ValueError as e:
+        if rank == 0:
+            print(f"Error: Invalid arguments. All parameters must be integers.")
+            print(f"Details: {e}")
+            sys.stdout.flush()
+    except Exception as e:
+        if rank == 0:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.stdout.flush()
+
+
 if __name__ == "__main__":
     # Check if running in interactive mode
     if len(sys.argv) > 1 and sys.argv[1] == "--interactive":
         interactive_demo()
+    elif len(sys.argv) > 1 and sys.argv[1].isdigit():
+        # Command-line mode with parameters
+        command_line_demo()
     else:
         main()
