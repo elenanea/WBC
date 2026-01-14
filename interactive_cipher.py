@@ -1149,12 +1149,16 @@ def main_cmdline(args):
             
             # Read input with proper error handling for MPI environment
             try:
-                text = sys.stdin.readline().rstrip('\n')
+                text = sys.stdin.readline()
+                if text:
+                    text = text.rstrip('\n\r')
                 if not text:
-                    text = input()  # Fallback to input() if readline doesn't work
-            except (EOFError, IOError):
-                print("⚠ Warning: Could not read from stdin, using fallback")
-                text = "Default test text"
+                    # If readline returns empty, stdin might be closed
+                    raise EOFError("Empty input from readline")
+            except (EOFError, IOError) as e:
+                print(f"⚠ Warning: Could not read from stdin ({e}), using default text")
+                sys.stdout.flush()
+                text = "Default test text for MPI environment"
             
             print()
             print(f"[DEBUG rank {rank}] After input, text length: {len(text)}")
