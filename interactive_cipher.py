@@ -10,10 +10,19 @@ import time
 import secrets
 import hashlib
 import hmac
+import os
 from typing import Tuple, Optional
 from mpi4py import MPI
 from wbc1_parallel import ParallelWBC1, WBC1Cipher
 import numpy as np
+
+# Redirect stdin for non-rank-0 processes to avoid input() issues in MPI
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+if rank != 0:
+    # Close stdin and redirect to /dev/null for non-root processes
+    sys.stdin.close()
+    sys.stdin = open(os.devnull, 'r')
 
 
 def generate_random_key(length: int) -> bytes:
@@ -515,8 +524,7 @@ def encrypt_wbc_ctr_hmac_mode(plaintext: bytes, key: bytes, block_size: int, num
 
 def parallel_encrypt_ecb_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[bytes, float, float]:
     """Encrypt using parallel ECB mode - distributes blocks across MPI processes."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     size = comm.Get_size()
     
     cipher = WBC1Cipher(key, block_size=block_size, num_rounds=num_rounds)
@@ -623,8 +631,7 @@ def parallel_encrypt_ecb_mode(plaintext: bytes, key: bytes, block_size: int, num
 
 def parallel_encrypt_ctr_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[bytes, float, float]:
     """Encrypt using parallel CTR mode - distributes counter blocks across MPI processes."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     size = comm.Get_size()
     
     cipher = WBC1Cipher(key, block_size=block_size, num_rounds=num_rounds)
@@ -767,8 +774,7 @@ def parallel_encrypt_ctr_mode(plaintext: bytes, key: bytes, block_size: int, num
 
 def encrypt_parallel_mode(plaintext: bytes, key: bytes, block_size: int, num_rounds: int) -> Tuple[Optional[bytes], float, float]:
     """Encrypt using parallel MPI mode."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     
     cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
     
@@ -847,8 +853,7 @@ def display_results(original: str, decrypted: bytes, enc_time: float, dec_time: 
 
 def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_rounds: int, data_size_kb: int):
     """Run statistical analysis and tests on the cipher."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     size = comm.Get_size()
     
     from wbc1_parallel import shannon_entropy, avalanche_test, frequency_test, correlation_test
@@ -1039,8 +1044,7 @@ def run_statistical_analysis(key: bytes, key_size: int, mode_name: str, num_roun
 
 def main_cmdline(args):
     """Main function for command-line mode."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     size = comm.Get_size()
     
     # Parse arguments: mpi_mode key_size key_source mode rounds task [data_size]
@@ -1253,8 +1257,7 @@ def main_cmdline(args):
 
 def main():
     """Main interactive program."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    global comm, rank
     size = comm.Get_size()
     
     # Check if command-line arguments are provided
