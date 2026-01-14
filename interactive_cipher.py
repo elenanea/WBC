@@ -536,25 +536,12 @@ def parallel_encrypt_ecb_mode(plaintext: bytes, key: bytes, block_size: int, num
         blocks = None
         num_blocks = None
     
-    # Broadcast number of blocks
+    # Broadcast number of blocks and all blocks to all processes
     num_blocks = comm.bcast(num_blocks, root=0)
+    blocks = comm.bcast(blocks, root=0)
     
-    # Scatter blocks to processes
-    local_blocks = []
-    for i in range(num_blocks):
-        if rank == 0:
-            block_to_send = blocks[i] if i < len(blocks) else None
-        else:
-            block_to_send = None
-        
-        # Determine which rank should get this block (round-robin)
-        target_rank = i % size
-        if rank == target_rank:
-            received_block = comm.bcast(block_to_send, root=0)
-            if received_block:
-                local_blocks.append(received_block)
-        else:
-            comm.bcast(block_to_send, root=0)
+    # Each process determines which blocks it should encrypt (round-robin)
+    local_blocks = [blocks[i] for i in range(num_blocks) if i % size == rank]
     
     # Each process encrypts its blocks
     comm.Barrier()
@@ -588,31 +575,12 @@ def parallel_encrypt_ecb_mode(plaintext: bytes, key: bytes, block_size: int, num
     ciphertext = comm.bcast(ciphertext, root=0)
     encryption_time = comm.bcast(encryption_time, root=0)
     
-    # Parallel decryption (same approach)
-    if rank == 0:
-        num_blocks = len(ciphertext) // block_size
-        blocks = [ciphertext[i*block_size:(i+1)*block_size] for i in range(num_blocks)]
-    else:
-        num_blocks = None
-        blocks = None
+    # Parallel decryption
+    num_blocks = len(ciphertext) // block_size
+    blocks = [ciphertext[i*block_size:(i+1)*block_size] for i in range(num_blocks)]
     
-    num_blocks = comm.bcast(num_blocks, root=0)
-    
-    # Scatter blocks for decryption
-    local_blocks = []
-    for i in range(num_blocks):
-        if rank == 0:
-            block_to_send = blocks[i] if i < len(blocks) else None
-        else:
-            block_to_send = None
-        
-        target_rank = i % size
-        if rank == target_rank:
-            received_block = comm.bcast(block_to_send, root=0)
-            if received_block:
-                local_blocks.append(received_block)
-        else:
-            comm.bcast(block_to_send, root=0)
+    # Each process determines which blocks to decrypt (round-robin)
+    local_blocks = [blocks[i] for i in range(num_blocks) if i % size == rank]
     
     # Each process decrypts its blocks
     comm.Barrier()
