@@ -28,6 +28,7 @@ Parallel implementation of the WBC1 (White-Box Cipher 1) block cipher algorithm 
 ├── wbc1_parallel.py      # Main implementation
 ├── example_parallel.py   # Example demonstrations
 ├── test_wbc1.py          # Test suite
+├── benchmark.py          # Performance benchmarks
 └── requirements.txt      # Python dependencies
 ```
 
@@ -191,6 +192,19 @@ The implementation includes several statistical tests to evaluate cipher quality
 ## Examples
 
 See `wbc1_parallel.py` main function for a complete working example.
+
+### Running Tests
+
+```bash
+# Run test suite
+python3 test_wbc1.py
+
+# Run examples with MPI
+mpiexec --oversubscribe -n 4 python3 example_parallel.py
+
+# Run benchmarks
+mpiexec --oversubscribe -n 2 python3 benchmark.py
+```
 
 ## License
 
