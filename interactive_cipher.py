@@ -38,12 +38,12 @@ def get_text_input() -> str:
     print("   Enter text to encrypt:")
     print()
     text = input("   Введите текст: ")
+    print()  # Add blank line after input for better separation
     return text
 
 
 def get_key_choice() -> Tuple[bytes, str]:
     """Get encryption key from user or generate automatically."""
-    print()
     print("2. ВЫБОР КЛЮЧА ШИФРОВАНИЯ")
     print("   Encryption key selection:")
     print()
@@ -52,13 +52,14 @@ def get_key_choice() -> Tuple[bytes, str]:
     print()
     
     choice = input("   Ваш выбор (1/2): ").strip()
+    print()  # Add blank line after input
     
     if choice == "1":
         key_str = input("   Введите ключ: ")
+        print()  # Add blank line after input
         key = key_str.encode('utf-8')
         key_source = "пользовательский (user-provided)"
     else:
-        print()
         print("3. ДЛИНА КЛЮЧА")
         print("   Key length:")
         print()
@@ -70,6 +71,7 @@ def get_key_choice() -> Tuple[bytes, str]:
         print()
         
         length_choice = input("   Ваш выбор (1-4): ").strip()
+        print()  # Add blank line after input
         
         if length_choice == "1":
             length = 16
@@ -80,6 +82,7 @@ def get_key_choice() -> Tuple[bytes, str]:
         else:
             try:
                 length = int(input("   Введите длину ключа в байтах: "))
+                print()  # Add blank line after input
                 if length < 8:
                     print("   ⚠ Предупреждение: длина меньше 8 байт небезопасна!")
                     length = max(8, length)
@@ -95,7 +98,6 @@ def get_key_choice() -> Tuple[bytes, str]:
 
 def get_rounds() -> int:
     """Get number of encryption rounds."""
-    print()
     print("4. КОЛИЧЕСТВО РАУНДОВ ШИФРОВАНИЯ")
     print("   Number of encryption rounds:")
     print()
@@ -108,6 +110,7 @@ def get_rounds() -> int:
     print()
     
     choice = input("   Ваш выбор (1-5): ").strip()
+    print()  # Add blank line after input
     
     if choice == "1":
         return 10
@@ -120,6 +123,7 @@ def get_rounds() -> int:
     else:
         try:
             rounds = int(input("   Введите количество раундов: "))
+            print()  # Add blank line after input
             return max(1, rounds)
         except ValueError:
             print("   ⚠ Некорректный ввод, используется 16 раундов")
@@ -128,7 +132,6 @@ def get_rounds() -> int:
 
 def get_mode() -> str:
     """Get encryption mode."""
-    print()
     print("5. РЕЖИМ ШИФРОВАНИЯ")
     print("   Encryption mode:")
     print()
@@ -137,6 +140,7 @@ def get_mode() -> str:
     print()
     
     choice = input("   Ваш выбор (1-2): ").strip()
+    print()  # Add blank line after input
     
     if choice == "1":
         return "ECB"
