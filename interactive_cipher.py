@@ -1215,8 +1215,10 @@ def main_cmdline(args):
             # All ranks need the plaintext for parallel processing
             plaintext = text.encode('utf-8')
             decrypted, enc_time, dec_time = parallel_mode_functions[mode_name](plaintext, key, block_size, num_rounds)
-            if rank == 0:
-                ciphertext = b"<encrypted>"  # Placeholder for display
+            # Set ciphertext placeholder for all ranks
+            ciphertext = b"<encrypted>"  # Placeholder for display
+            # Synchronize after parallel encryption/decryption
+            comm.Barrier()
         elif mode_name in sequential_mode_functions:
             # Sequential modes - only rank 0 does the work
             if rank == 0:
