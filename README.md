@@ -19,6 +19,18 @@ Parallel implementation of the WBC1 (White-Box Cipher 1) block cipher algorithm 
   - Frequency analysis
   - Correlation testing
 
+## Repository Structure
+
+```
+.
+├── README.md              # Main documentation
+├── USAGE.md              # Detailed usage guide
+├── wbc1_parallel.py      # Main implementation
+├── example_parallel.py   # Example demonstrations
+├── test_wbc1.py          # Test suite
+└── requirements.txt      # Python dependencies
+```
+
 ## Requirements
 
 - Python 3.6+
