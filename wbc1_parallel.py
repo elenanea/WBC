@@ -950,16 +950,33 @@ def interactive_demo():
         print("  2) Сгенерировать автоматически (Generate automatically)")
         print()
         
-        choice = input("  Ваш выбор / Your choice (1/2): ").strip()
-        print(f"  ✓ Выбрано / Selected: {choice}")
-        print()
+        try:
+            sys.stdout.flush()
+            choice = sys.stdin.readline().strip()
+            if not choice:
+                choice = "2"  # Default to auto-generate
+            print(f"  ✓ Выбрано / Selected: {choice}")
+            print()
+        except Exception as e:
+            print(f"  ⚠ Ошибка ввода, используется автогенерация / Input error, using auto-generation")
+            choice = "2"
+            print()
         
         if choice == "1":
-            key_str = input("  Введите ключ / Enter key: ")
-            print(f"  ✓ Ключ введён / Key entered: {key_str[:20]}{'...' if len(key_str) > 20 else ''}")
-            print()
-            key = key_str.encode('utf-8')
-            key_source = "пользовательский / user-provided"
+            try:
+                sys.stdout.flush()
+                key_str = sys.stdin.readline().strip()
+                if not key_str:
+                    key_str = "DefaultKey123456"  # Default key if none provided
+                print(f"  ✓ Ключ введён / Key entered: {key_str[:20]}{'...' if len(key_str) > 20 else ''}")
+                print()
+                key = key_str.encode('utf-8')
+                key_source = "пользовательский / user-provided"
+            except Exception as e:
+                print(f"  ⚠ Ошибка ввода, используется ключ по умолчанию / Input error, using default key")
+                key = b"DefaultKey123456"
+                key_source = "по умолчанию / default"
+                print()
         else:
             print("2. ДЛИНА КЛЮЧА / KEY LENGTH")
             print()
@@ -970,9 +987,17 @@ def interactive_demo():
             print("  4) Другая длина / Custom")
             print()
             
-            length_choice = input("  Ваш выбор / Your choice (1-4): ").strip()
-            print(f"  ✓ Выбрано / Selected: {length_choice}")
-            print()
+            try:
+                sys.stdout.flush()
+                length_choice = sys.stdin.readline().strip()
+                if not length_choice:
+                    length_choice = "3"  # Default to 256-bit
+                print(f"  ✓ Выбрано / Selected: {length_choice}")
+                print()
+            except Exception as e:
+                print(f"  ⚠ Ошибка ввода, используется 32 байта / Input error, using 32 bytes")
+                length_choice = "3"
+                print()
             
             if length_choice == "1":
                 length = 16
@@ -982,14 +1007,19 @@ def interactive_demo():
                 length = 32
             else:
                 try:
-                    length = int(input("  Введите длину ключа в байтах / Enter key length in bytes: "))
+                    sys.stdout.flush()
+                    length_str = sys.stdin.readline().strip()
+                    if not length_str:
+                        length = 32  # Default to 32 bytes
+                    else:
+                        length = int(length_str)
                     print(f"  ✓ Введено / Entered: {length} байт / bytes")
                     print()
                     if length < 8:
                         print("  ⚠ Предупреждение: длина меньше 8 байт небезопасна!")
                         print("  ⚠ Warning: length less than 8 bytes is insecure!")
                         length = max(8, length)
-                except ValueError:
+                except (ValueError, Exception):
                     print("  ⚠ Некорректный ввод, используется 16 байт")
                     print("  ⚠ Invalid input, using 16 bytes")
                     length = 16
@@ -1011,9 +1041,17 @@ def interactive_demo():
         print("  5) Другое значение / Custom")
         print()
         
-        rounds_choice = input("  Ваш выбор / Your choice (1-5): ").strip()
-        print(f"  ✓ Выбрано / Selected: {rounds_choice}")
-        print()
+        try:
+            sys.stdout.flush()
+            rounds_choice = sys.stdin.readline().strip()
+            if not rounds_choice:
+                rounds_choice = "2"  # Default to 16 rounds
+            print(f"  ✓ Выбрано / Selected: {rounds_choice}")
+            print()
+        except Exception as e:
+            print(f"  ⚠ Ошибка ввода, используется 16 раундов / Input error, using 16 rounds")
+            rounds_choice = "2"
+            print()
         
         if rounds_choice == "1":
             num_rounds = 10
@@ -1025,11 +1063,16 @@ def interactive_demo():
             num_rounds = 32
         else:
             try:
-                num_rounds = int(input("  Введите количество раундов / Enter number of rounds: "))
+                sys.stdout.flush()
+                rounds_str = sys.stdin.readline().strip()
+                if not rounds_str:
+                    num_rounds = 16  # Default
+                else:
+                    num_rounds = int(rounds_str)
                 print(f"  ✓ Введено / Entered: {num_rounds} раундов / rounds")
                 print()
                 num_rounds = max(1, num_rounds)
-            except ValueError:
+            except (ValueError, Exception):
                 print("  ⚠ Некорректный ввод, используется 16 раундов")
                 print("  ⚠ Invalid input, using 16 rounds")
                 num_rounds = 16
@@ -1047,9 +1090,17 @@ def interactive_demo():
         print("  6) Parallel MPI (полное параллельное шифрование / full parallel encryption)")
         print()
         
-        mode_choice = input("  Ваш выбор / Your choice (1-6): ").strip()
-        print(f"  ✓ Выбрано / Selected: {mode_choice}")
-        print()
+        try:
+            sys.stdout.flush()
+            mode_choice = sys.stdin.readline().strip()
+            if not mode_choice:
+                mode_choice = "1"  # Default to ECB
+            print(f"  ✓ Выбрано / Selected: {mode_choice}")
+            print()
+        except Exception as e:
+            print(f"  ⚠ Ошибка ввода, используется ECB / Input error, using ECB")
+            mode_choice = "1"
+            print()
         
         mode_map = {
             "1": "ECB",
