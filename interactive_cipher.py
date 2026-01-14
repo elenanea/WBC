@@ -1080,12 +1080,30 @@ def main_cmdline(args):
         mode_num = int(args[3])
         num_rounds = int(args[4])
         task = int(args[5])
-        data_size_kb = int(args[6]) if len(args) > 6 else 10
-        # Optional 8th parameter: text to encrypt (for task=0)
-        cmdline_text = args[7] if len(args) > 7 else None
-    except ValueError:
+        
+        # Handle optional parameters differently based on task
+        cmdline_text = None
+        data_size_kb = 10  # default
+        
+        if task == 0:
+            # Text encryption mode: optional text parameter
+            if len(args) > 6:
+                # Check if arg 6 is a placeholder '-' or text
+                if args[6] == '-' and len(args) > 7:
+                    # Format: ... task - "text"
+                    cmdline_text = args[7]
+                elif args[6] != '-':
+                    # Format: ... task "text" (no placeholder)
+                    cmdline_text = args[6]
+        elif task == 1:
+            # Statistical analysis mode: data_size_kb must be integer
+            if len(args) > 6:
+                data_size_kb = int(args[6])
+    except (ValueError, IndexError) as e:
         if rank == 0:
-            print("Error: Invalid arguments. All must be integers.")
+            print(f"Error: Invalid arguments. {e}")
+            print("Usage for task=0 (text encryption): ... <task> [- text] OR ... <task> text")
+            print("Usage for task=1 (statistics): ... <task> <data_size_kb>")
         return
     
     # Map mode number to mode name
