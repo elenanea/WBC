@@ -1148,11 +1148,19 @@ def main_cmdline(args):
             sys.stdout.flush()  # Ensure output is displayed before input
             text = input()
             print()
+            print(f"[DEBUG rank {rank}] After input, text length: {len(text)}")
+            sys.stdout.flush()
         else:
             text = None
+            print(f"[DEBUG rank {rank}] Non-root process waiting for broadcast")
+            sys.stdout.flush()
         
         # Broadcast text to all processes
+        print(f"[DEBUG rank {rank}] Before broadcast")
+        sys.stdout.flush()
         text = comm.bcast(text, root=0)
+        print(f"[DEBUG rank {rank}] After broadcast, text: {text[:50] if text else 'None'}...")
+        sys.stdout.flush()
         
         if rank == 0:
             print(f"Введенный текст / Input text: {text}")
