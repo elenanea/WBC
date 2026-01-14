@@ -890,11 +890,15 @@ def main_cmdline(args):
         }
         
         if mode_name in mode_functions:
+            # Sequential modes - only rank 0 does the work
             if rank == 0:
                 plaintext = text.encode('utf-8')
                 decrypted, enc_time, dec_time = mode_functions[mode_name](plaintext, key, block_size, num_rounds)
                 ciphertext = b"<encrypted>"  # We don't need full ciphertext display
+            # Synchronize all processes
+            comm.Barrier()
         elif mode_name == "Parallel":
+            # Parallel mode - all ranks participate
             cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
             if rank == 0:
                 plaintext = text.encode('utf-8')
@@ -909,7 +913,7 @@ def main_cmdline(args):
             decrypted = cipher.decrypt(ciphertext)
             dec_time = time.time() - start_time
         
-        # Display results
+        # Display results - only rank 0
         if rank == 0:
             print()
             print_separator()
