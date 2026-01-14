@@ -1211,22 +1211,46 @@ def main_cmdline(args):
             dec_time = comm.bcast(dec_time, root=0)
         elif mode_name == "Parallel":
             # Parallel MPI mode - all ranks participate
+            if rank == 0:
+                print(f"DEBUG: Starting Parallel mode encryption on rank {rank}")
+                sys.stdout.flush()
+            
             cipher = ParallelWBC1(key, block_size=block_size, num_rounds=num_rounds)
             if rank == 0:
                 plaintext = text.encode('utf-8')
+                print(f"DEBUG: Plaintext length: {len(plaintext)}")
+                sys.stdout.flush()
             else:
                 plaintext = None
+            
+            if rank == 0:
+                print("DEBUG: About to call encrypt()")
+                sys.stdout.flush()
             
             start_time = time.time()
             ciphertext = cipher.encrypt(plaintext)
             enc_time = time.time() - start_time
             
+            if rank == 0:
+                print(f"DEBUG: Encryption completed, ciphertext length: {len(ciphertext) if ciphertext else 'None'}")
+                sys.stdout.flush()
+            
             start_time = time.time()
             decrypted = cipher.decrypt(ciphertext)
             dec_time = time.time() - start_time
             
+            if rank == 0:
+                print(f"DEBUG: Decryption completed, decrypted length: {len(decrypted) if decrypted else 'None'}")
+                sys.stdout.flush()
+            
             # Synchronize after parallel mode
+            if rank == 0:
+                print("DEBUG: About to call Barrier()")
+                sys.stdout.flush()
             comm.Barrier()
+            if rank == 0:
+                print("DEBUG: Barrier() completed")
+                sys.stdout.flush()
         
         # Display results - only rank 0
         if rank == 0:
