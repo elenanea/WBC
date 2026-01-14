@@ -1154,6 +1154,7 @@ def main_cmdline(args):
             print(f"Введенный текст / Input text: {text}")
             print()
             print("⏳ Выполняется шифрование / Encrypting...")
+            sys.stdout.flush()  # Ensure message is displayed
         
         # Encrypt
         block_size = 16
@@ -1243,6 +1244,7 @@ def main_cmdline(args):
                 print("✗ ОШИБКА: Расшифровка не совпадает!")
                 print("✗ ERROR: Decryption mismatch!")
             print_separator()
+            sys.stdout.flush()  # Ensure all output is displayed
     
     elif task == 1:
         # Statistical analysis mode
