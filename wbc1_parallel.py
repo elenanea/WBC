@@ -12,8 +12,157 @@ This implementation includes:
 import numpy as np
 from mpi4py import MPI
 import sys
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import hashlib
+import json
+
+
+# ===== Helper Functions for Bit Rotation and Cube Operations =====
+
+def rotate_right(byte: int, n: int) -> int:
+    """Rotate byte right by n bits."""
+    return ((byte >> n) | (byte << (8 - n))) & 0xFF
+
+
+def rotate_left(byte: int, n: int) -> int:
+    """Rotate byte left by n bits."""
+    return ((byte << n) | (byte >> (8 - n))) & 0xFF
+
+
+def _bitwise_rotate_cube(cube: np.ndarray, n: int, direction: str) -> np.ndarray:
+    """Apply bitwise rotation to all bytes in cube."""
+    flat = cube.flatten()
+    if direction == 'right':
+        rotated = np.array([rotate_right(b, n % 8) for b in flat], dtype=np.uint8)
+    else:
+        rotated = np.array([rotate_left(b, n % 8) for b in flat], dtype=np.uint8)
+    return rotated.reshape(cube.shape)
+
+
+def _parse_alg_string(alg: str):
+    """Parse Rubik's cube algorithm string into moves."""
+    tokens = alg.replace(",", " ").split()
+    return tokens
+
+
+def build_127_ascii_operations(key: bytes) -> list:
+    """
+    Build 127 unique operations based on encryption key.
+    Operations include Rubik's cube moves, algorithms, and dynamic patterns.
+    """
+    faces = ['U', 'D', 'L', 'R', 'F', 'B']
+    directions = ['', "'", '2', '3']
+    slices = ['M', 'E', 'S']
+    wide_moves = ['u', 'd', 'l', 'r', 'f', 'b']
+    cube_rot = ['x', 'y', 'z']
+    
+    # PLL Algorithms
+    algs = [
+        ("T-Perm", "R U R' U' R' F R2 U' R' U' R U R' F'"),
+        ("Y-Perm", "F R U' R' U' R U R' F' R U R' U' R' F R F'"),
+        ("J-Perm", "R U R' F' R U R' U' R' F R2 U' R' U'"),
+        ("F-Perm", "R' U' F' R U R' U' R' F R2 U' R' U' R U R' U R"),
+        ("A-Perm", "x' R2 D2 R' U' R D2 R' U R' x"),
+        ("E-Perm", "x' R U' R' D R U R' D' R U R' D R U' R' D' x"),
+        ("R-Perm", "R U' R' U' R U R D R' U' R D' R' U2 R'"),
+        ("U-Perm", "R U' R U R U R U' R' U' R2"),
+        ("V-Perm", "R' U R' U' y R' F' R2 U' R' U R' F R F"),
+        ("N-Perm", "R U R' U R U R' F' R U R' U' R' F R2 U' R' U2 R U' R'"),
+        ("Z-Perm", "M2 U M2 U M' U2 M2 U2 M' U2"),
+        ("H-Perm", "M2 U M2 U2 M2 U M2")
+    ]
+    
+    # Patterns
+    patterns = [
+        ("Checkerboard", "M2 E2 S2"),
+        ("Cube-in-Cube", "F L F U' R U F2 L2 U' L' B D' B' L2 U"),
+        ("Superflip", "U R2 F B R B2 R U2 L B2 R U' D' R2 F R' L B2 U2 F2"),
+        ("Six-Spot", "U D' R L' F B' U D'"),
+        ("Tetris", "L R F B U' D' L' R'"),
+        ("Anaconda", "L U B' U' R L' B R' F B' D R D' F'"),
+        ("Python", "F2 R' B' U R' L F' L F' B D' R B L2"),
+        ("Black Mamba", "R D L F' R U' R' F L' D' R' U")
+    ]
+    
+    # Build base operations
+    base_ops = []
+    
+    # Face rotations
+    for face in faces:
+        for dir in directions:
+            base_ops.append(('face', face, dir, f"Rotate {face} face {dir}"))
+    
+    # Slice moves
+    for sl in slices:
+        for dir in directions:
+            base_ops.append(('slice', sl, dir, f"Rotate {sl} slice {dir}"))
+    
+    # Wide moves
+    for move in wide_moves:
+        for dir in directions:
+            base_ops.append(('wide', move, dir, f"Wide move {move}{dir}"))
+    
+    # Cube rotations
+    for rot in cube_rot:
+        for dir in directions:
+            base_ops.append(('cube', rot, dir, f"Cube rotation {rot}{dir}"))
+    
+    # Algorithms
+    for name, alg in algs:
+        base_ops.append(('alg', name, alg, f"Algorithm: {name}"))
+    
+    # Patterns
+    for name, pattern in patterns:
+        base_ops.append(('pattern', name, pattern, f"Pattern: {name}"))
+    
+    # Swap operations
+    for axis in range(3):
+        for k in range(4):
+            base_ops.append(('swap', axis, k, f"Swap axis={axis}, offset={k}"))
+    
+    # Diagonal flip operations
+    for axis in range(3):
+        base_ops.append(('diagflip', axis, '', f"Diagonal flip axis={axis}"))
+    
+    static_ops = base_ops[:]
+    
+    # Generate dynamic operations
+    dynamic_ops = []
+    for i in range(20):
+        seed = int(hashlib.sha256(key + i.to_bytes(2, "little")).hexdigest(), 16) & 0xFFFFFFFF
+        rng = np.random.RandomState(seed)
+        ops = []
+        n_ops = rng.randint(4, 8)  # 4-7 operations
+        for _ in range(n_ops):
+            op = static_ops[rng.randint(0, len(static_ops))]
+            ops.append(op)
+        dynamic_ops.append(('dynamic', i, ops, f"Dynamic pattern {i}"))
+    
+    all_ops = static_ops + dynamic_ops
+    
+    # Generate 127 unique operation chains
+    op_list = []
+    seen = set()
+    for i in range(127):
+        attempt = 0
+        while True:
+            seed = int(hashlib.sha256(
+                key + b"WBC1_OP" + i.to_bytes(2, 'little') + attempt.to_bytes(2, 'little')
+            ).hexdigest(), 16) & 0xFFFFFFFF
+            rng = np.random.RandomState(seed)
+            chain_len = rng.randint(3, 7)  # 3-6 operations per chain
+            chain = tuple(all_ops[rng.randint(0, len(all_ops))] for _ in range(chain_len))
+            chain_serialized = str(chain)
+            if chain_serialized not in seen:
+                seen.add(chain_serialized)
+                op_list.append(('dynamic', i, list(chain), f"Dynamic ASCII op {i+1}"))
+                break
+            attempt += 1
+            if attempt > 1000:  # Safety limit
+                op_list.append(('dynamic', i, [all_ops[i % len(all_ops)]], f"Dynamic ASCII op {i+1}"))
+                break
+    
+    return op_list
 
 
 class WBC1Cipher:
@@ -42,6 +191,10 @@ class WBC1Cipher:
         
         # Generate round keys
         self.round_keys = self._generate_round_keys()
+        
+        # Generate dynamic operations for enhanced security
+        self._base_operations = build_127_ascii_operations(self.key)
+        self.operations = self._individualize_operations()
     
     def _generate_sbox(self) -> np.ndarray:
         """Generate S-box using key-dependent transformation."""
@@ -89,6 +242,21 @@ class WBC1Cipher:
             round_keys.append(round_key)
         return round_keys
     
+    def _individualize_operations(self) -> Dict[int, Tuple]:
+        """Sort operations by hash for key-dependent ordering."""
+        ops = self._base_operations[:]
+        
+        def op_sort_key(op):
+            # Convert tuple to serializable structure for hashing
+            serializable = [str(x) for x in op]
+            h = hashlib.sha256(
+                json.dumps(serializable, sort_keys=True).encode() + self.key
+            ).digest()
+            return h
+        
+        ops.sort(key=op_sort_key)
+        return {i: op for i, op in enumerate(ops)}
+    
     def _substitute_bytes(self, block: np.ndarray) -> np.ndarray:
         """Apply S-box substitution to block."""
         return self.sbox[block]
@@ -126,6 +294,49 @@ class WBC1Cipher:
         """XOR block with round key."""
         return block ^ round_key
     
+    def _apply_operation(self, block: np.ndarray, op_id: int, inverse=False) -> np.ndarray:
+        """
+        Apply a dynamic operation to the block.
+        Note: This is a simplified version for fixed block sizes.
+        The full cube operations require 3D reshaping which is not compatible
+        with arbitrary block sizes. This applies the operation concept using
+        permutation and XOR based on the operation ID.
+        """
+        op = self.operations[op_id % len(self.operations)]
+        op_type = op[0]
+        
+        # For dynamic operations, apply the sequence
+        if op_type == 'dynamic':
+            for subop in (reversed(op[2]) if inverse else op[2]):
+                block = self._apply_single_operation(block, subop, inverse)
+            return block
+        
+        return self._apply_single_operation(block, op, inverse)
+    
+    def _apply_single_operation(self, block: np.ndarray, op, inverse=False) -> np.ndarray:
+        """
+        Apply a single operation. Simplified for compatibility with fixed block sizes.
+        Uses operation metadata to derive a deterministic transformation.
+        """
+        # Generate a deterministic permutation based on operation
+        op_hash = hashlib.sha256(str(op).encode() + self.key).digest()
+        seed = int.from_bytes(op_hash[:4], 'big')
+        rng = np.random.RandomState(seed)
+        
+        # Create a byte-level permutation
+        perm = np.arange(self.block_size, dtype=np.int32)
+        rng.shuffle(perm)
+        
+        if inverse:
+            # Apply inverse permutation
+            inv_perm = np.zeros(self.block_size, dtype=np.int32)
+            for i in range(self.block_size):
+                inv_perm[perm[i]] = i
+            return block[inv_perm]
+        else:
+            # Apply forward permutation
+            return block[perm]
+    
     def encrypt_block(self, plaintext_block: np.ndarray) -> np.ndarray:
         """
         Encrypt a single block.
@@ -144,13 +355,27 @@ class WBC1Cipher:
         # Initial round key addition
         state = self._xor_with_key(state, self.round_keys[0])
         
-        # Main rounds
+        # Main rounds with dynamic operations
         for round_num in range(1, self.num_rounds):
+            # Apply dynamic operation based on round key
+            op_id = self.round_keys[round_num][0] % len(self.operations)
+            state = self._apply_operation(state, op_id, inverse=False)
+            
             # Substitution layer
             state = self._substitute_bytes(state)
             
+            # Diffusion: cumulative XOR (forward)
+            for i in range(1, len(state)):
+                state[i] ^= state[i-1]
+            
             # Permutation layer
             state = self._permute_bits(state)
+            
+            # Bitwise rotation based on operation ID
+            state_flat = state.copy()
+            for i in range(len(state_flat)):
+                state_flat[i] = rotate_right(int(state_flat[i]), op_id % 8)
+            state = state_flat
             
             # Cyclic shift
             state = self._rotate_left(state, round_num % self.block_size)
@@ -181,7 +406,7 @@ class WBC1Cipher:
         # Inverse final substitution
         state = self._inverse_substitute_bytes(state)
         
-        # Inverse main rounds
+        # Inverse main rounds with dynamic operations
         for round_num in range(self.num_rounds - 1, 0, -1):
             # Inverse key mixing
             state = self._xor_with_key(state, self.round_keys[round_num])
@@ -189,11 +414,25 @@ class WBC1Cipher:
             # Inverse cyclic shift
             state = self._rotate_right(state, round_num % self.block_size)
             
+            # Inverse bitwise rotation
+            op_id = self.round_keys[round_num][0] % len(self.operations)
+            state_flat = state.copy()
+            for i in range(len(state_flat)):
+                state_flat[i] = rotate_left(int(state_flat[i]), op_id % 8)
+            state = state_flat
+            
             # Inverse permutation
             state = self._inverse_permute_bits(state)
             
+            # Inverse diffusion: cumulative XOR (backward)
+            for i in range(len(state)-1, 0, -1):
+                state[i] ^= state[i-1]
+            
             # Inverse substitution
             state = self._inverse_substitute_bytes(state)
+            
+            # Apply inverse dynamic operation
+            state = self._apply_operation(state, op_id, inverse=True)
         
         # Inverse initial round key addition
         state = self._xor_with_key(state, self.round_keys[0])
