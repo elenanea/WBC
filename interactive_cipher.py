@@ -1058,7 +1058,7 @@ def main_cmdline(args):
     
     if len(args) < 6:
         if rank == 0:
-            print("Usage: python3 interactive_cipher.py <mpi_mode> <key_size> <key_source> <mode> <rounds> <task> [data_size]")
+            print("Usage: python3 interactive_cipher.py <mpi_mode> <key_size> <key_source> <mode> <rounds> <task> [data_size] [text]")
             print("  mpi_mode: 0 or 1 (placeholder)")
             print("  key_size: key size in bits (e.g., 128, 192, 256)")
             print("  key_source: 0=auto-generate, 1=user-provided")
@@ -1066,8 +1066,10 @@ def main_cmdline(args):
             print("  rounds: number of rounds (e.g., 16, 32, 64)")
             print("  task: 0=text encryption, 1=statistical analysis")
             print("  data_size: size in KB (required for task=1)")
+            print("  text: text to encrypt (optional for task=0, avoids interactive input)")
             print()
             print("Example: mpiexec -n 4 python3 interactive_cipher.py 0 256 0 2 64 0")
+            print("Example: mpiexec -n 4 python3 interactive_cipher.py 0 256 0 2 64 0 - \"Hello world\"")
             print("Example: mpiexec -n 4 python3 interactive_cipher.py 0 256 0 2 64 1 1000")
         return
     
@@ -1079,6 +1081,8 @@ def main_cmdline(args):
         num_rounds = int(args[4])
         task = int(args[5])
         data_size_kb = int(args[6]) if len(args) > 6 else 10
+        # Optional 8th parameter: text to encrypt (for task=0)
+        cmdline_text = args[7] if len(args) > 7 else None
     except ValueError:
         if rank == 0:
             print("Error: Invalid arguments. All must be integers.")
@@ -1143,24 +1147,32 @@ def main_cmdline(args):
         if rank == 0:
             print("РЕЖИМ ШИФРОВАНИЯ ТЕКСТА / TEXT ENCRYPTION MODE")
             print()
-            print("Введите текст для шифрования:")
-            print("Enter text to encrypt:")
-            sys.stdout.flush()  # Ensure output is displayed before input
             
-            # Read input with proper error handling for MPI environment
-            try:
-                text = sys.stdin.readline()
-                if text:
-                    text = text.rstrip('\n\r')
-                if not text:
-                    # If readline returns empty, stdin might be closed
-                    raise EOFError("Empty input from readline")
-            except (EOFError, IOError) as e:
-                print(f"⚠ Warning: Could not read from stdin ({e}), using default text")
-                sys.stdout.flush()
-                text = "Default test text for MPI environment"
+            # Check if text was provided as command-line argument
+            if cmdline_text:
+                text = cmdline_text
+                print(f"Текст из командной строки / Text from command line: {text[:80]}{'...' if len(text) > 80 else ''}")
+                print()
+            else:
+                print("Введите текст для шифрования:")
+                print("Enter text to encrypt:")
+                sys.stdout.flush()  # Ensure output is displayed before input
+                
+                # Read input with proper error handling for MPI environment
+                try:
+                    text = sys.stdin.readline()
+                    if text:
+                        text = text.rstrip('\n\r')
+                    if not text:
+                        # If readline returns empty, stdin might be closed
+                        raise EOFError("Empty input from readline")
+                except (EOFError, IOError) as e:
+                    print(f"⚠ Warning: Could not read from stdin ({e}), using default text")
+                    sys.stdout.flush()
+                    text = "Default test text for MPI environment"
+                
+                print()
             
-            print()
             print(f"[DEBUG rank {rank}] After input, text length: {len(text)}")
             sys.stdout.flush()
         else:
