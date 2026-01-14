@@ -864,12 +864,13 @@ def main_cmdline(args):
             print()
             print("Введите текст для шифрования:")
             print("Enter text to encrypt:")
+            sys.stdout.flush()  # Ensure output is displayed before input
             text = input()
             print()
         else:
             text = None
         
-        # Broadcast text
+        # Broadcast text to all processes
         text = comm.bcast(text, root=0)
         
         if rank == 0:
