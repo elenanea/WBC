@@ -1261,17 +1261,19 @@ def command_line_demo():
             if rank == 0:
                 print("Error: Insufficient arguments")
                 print()
-                print("Usage: mpiexec -n <processes> python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task>")
+                print("Usage: mpiexec -n <processes> python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task> [data_size]")
                 print()
                 print("Parameters:")
                 print("  mpi_mode:   0 or 1 (placeholder)")
                 print("  key_size:   Key size in bits (128, 192, 256, etc.)")
                 print("  key_source: 0=auto-generate, 1=user-provided")
                 print("  rounds:     Number of encryption rounds")
-                print("  task:       0=text encryption with parallel mode")
+                print("  task:       0=text encryption, 1=statistical analysis")
+                print("  data_size:  Data size in KB (required for task=1)")
                 print()
-                print("Example:")
-                print("  mpiexec --oversubscribe --allow-run-as-root -n 4 python3 wbc1_parallel.py 0 256 0 64 0")
+                print("Examples:")
+                print("  Text encryption:     mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 64 0")
+                print("  Statistical analysis: mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 64 1 1000")
                 sys.stdout.flush()
             return
         
@@ -1283,10 +1285,20 @@ def command_line_demo():
         
         key_size = key_size_bits // 8
         
-        if task != 0:
+        # Get data_size for statistical analysis
+        data_size_kb = None
+        if task == 1:
+            if len(sys.argv) < 7:
+                if rank == 0:
+                    print("Error: task=1 requires data_size parameter (KB)")
+                    print("Example: mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 64 1 1000")
+                    sys.stdout.flush()
+                return
+            data_size_kb = int(sys.argv[6])
+        
+        if task not in [0, 1]:
             if rank == 0:
-                print("Error: Only task=0 (text encryption) is supported in command-line mode")
-                print("Use interactive_cipher.py for statistical analysis (task=1)")
+                print(f"Error: Invalid task={task}. Must be 0 (text encryption) or 1 (statistical analysis)")
                 sys.stdout.flush()
             return
         
@@ -1341,64 +1353,190 @@ def command_line_demo():
         # Create cipher instance
         cipher = ParallelWBC1(key, block_size=16, num_rounds=rounds)
         
-        # Encryption
-        if rank == 0:
-            print("РЕЖИМ ШИФРОВАНИЯ ТЕКСТА / TEXT ENCRYPTION MODE")
-            print()
-            print(f"Демонстрационный текст / Demo text:")
-            print(f"  '{demo_text}'")
-            print()
-            print("⏳ Выполняется шифрование / Encrypting...")
-            sys.stdout.flush()
-        
-        plaintext = demo_text.encode('utf-8')
-        
-        import time
-        start_enc = time.time()
-        ciphertext = cipher.encrypt(plaintext)
-        end_enc = time.time()
-        
-        if rank == 0:
-            print()
-            print(f"✓ Зашифровано / Encrypted: {len(ciphertext)} байт")
-            print(f"  Шифротекст (hex, первые 80 символов) / Ciphertext (hex, first 80 chars):")
-            print(f"  {ciphertext.hex()[:80]}...")
-            print(f"  Время шифрования / Encryption time: {end_enc - start_enc:.6f} сек")
-            print()
-            print("⏳ Выполняется расшифровка / Decrypting...")
-            sys.stdout.flush()
-        
-        # Decryption
-        start_dec = time.time()
-        decrypted = cipher.decrypt(ciphertext)
-        end_dec = time.time()
-        
-        if rank == 0:
-            print()
-            print(f"✓ Расшифровано / Decrypted: {len(decrypted)} байт")
+        if task == 0:
+            # TEXT ENCRYPTION MODE
+            if rank == 0:
+                print("РЕЖИМ ШИФРОВАНИЯ ТЕКСТА / TEXT ENCRYPTION MODE")
+                print()
+                print(f"Демонстрационный текст / Demo text:")
+                print(f"  '{demo_text}'")
+                print()
+                print("⏳ Выполняется шифрование / Encrypting...")
+                sys.stdout.flush()
             
-            try:
-                decrypted_text = decrypted.decode('utf-8')
-                print(f"  Расшифрованный текст / Decrypted text:")
-                print(f"  '{decrypted_text}'")
-            except:
-                print(f"  Расшифрованный текст (hex) / Decrypted text (hex):")
-                print(f"  {decrypted.hex()}")
+            plaintext = demo_text.encode('utf-8')
             
-            print(f"  Время расшифровки / Decryption time: {end_dec - start_dec:.6f} сек")
-            print()
+            import time
+            start_enc = time.time()
+            ciphertext = cipher.encrypt(plaintext)
+            end_enc = time.time()
             
-            # Verification
-            if decrypted == plaintext:
-                print("✓ ПРОВЕРКА ПРОЙДЕНА: расшифрованный текст совпадает с оригиналом")
-                print("✓ VERIFICATION PASSED: decrypted text matches original")
+            if rank == 0:
+                print()
+                print(f"✓ Зашифровано / Encrypted: {len(ciphertext)} байт")
+                print(f"  Шифротекст (hex, первые 80 символов) / Ciphertext (hex, first 80 chars):")
+                print(f"  {ciphertext.hex()[:80]}...")
+                print(f"  Время шифрования / Encryption time: {end_enc - start_enc:.6f} сек")
+                print()
+                print("⏳ Выполняется расшифровка / Decrypting...")
+                sys.stdout.flush()
+            
+            # Decryption
+            start_dec = time.time()
+            decrypted = cipher.decrypt(ciphertext)
+            end_dec = time.time()
+            
+            if rank == 0:
+                print()
+                print(f"✓ Расшифровано / Decrypted: {len(decrypted)} байт")
+                
+                try:
+                    decrypted_text = decrypted.decode('utf-8')
+                    print(f"  Расшифрованный текст / Decrypted text:")
+                    print(f"  '{decrypted_text}'")
+                except:
+                    print(f"  Расшифрованный текст (hex) / Decrypted text (hex):")
+                    print(f"  {decrypted.hex()}")
+                
+                print(f"  Время расшифровки / Decryption time: {end_dec - start_dec:.6f} сек")
+                print()
+                
+                # Verification
+                if decrypted == plaintext:
+                    print("✓ ПРОВЕРКА ПРОЙДЕНА: расшифрованный текст совпадает с оригиналом")
+                    print("✓ VERIFICATION PASSED: decrypted text matches original")
+                else:
+                    print("✗ ОШИБКА: расшифрованный текст не совпадает с оригиналом")
+                    print("✗ ERROR: decrypted text does not match original")
+                
+                print()
+                print("=" * 70)
+                sys.stdout.flush()
+        
+        elif task == 1:
+            # STATISTICAL ANALYSIS MODE
+            if rank == 0:
+                print("СТАТИСТИЧЕСКИЙ АНАЛИЗ / STATISTICAL ANALYSIS")
+                print()
+                print(f"Размер данных / Data size: {data_size_kb} KB")
+                print()
+                print("⏳ Генерация тестовых данных / Generating test data...")
+                sys.stdout.flush()
+            
+            import time
+            
+            # Generate test data
+            if rank == 0:
+                data_size_bytes = data_size_kb * 1024
+                plaintext = bytes([i % 256 for i in range(data_size_bytes)])
+                print(f"✓ Сгенерировано {data_size_bytes} байт / Generated {data_size_bytes} bytes")
+                print()
+                print("⏳ Выполняется шифрование / Encrypting...")
+                sys.stdout.flush()
             else:
-                print("✗ ОШИБКА: расшифрованный текст не совпадает с оригиналом")
-                print("✗ ERROR: decrypted text does not match original")
+                plaintext = None
             
-            print()
-            print("=" * 70)
-            sys.stdout.flush()
+            # Broadcast plaintext to all ranks
+            plaintext = comm.bcast(plaintext, root=0)
+            
+            # Encryption
+            start_enc = time.time()
+            ciphertext = cipher.encrypt(plaintext)
+            enc_time = time.time() - start_enc
+            
+            # Decryption
+            start_dec = time.time()
+            decrypted = cipher.decrypt(ciphertext)
+            dec_time = time.time() - start_dec
+            
+            if rank == 0:
+                print(f"✓ Шифрование завершено / Encryption completed")
+                print()
+                
+                # Performance metrics
+                print("=" * 70)
+                print("ПРОИЗВОДИТЕЛЬНОСТЬ / PERFORMANCE")
+                print("=" * 70)
+                print(f"Время шифрования / Encryption time:   {enc_time:.6f} сек")
+                print(f"Время расшифрования / Decryption time: {dec_time:.6f} сек")
+                print(f"Общее время / Total time:             {enc_time + dec_time:.6f} сек")
+                
+                throughput_enc = (data_size_kb / enc_time) if enc_time > 0 else 0
+                throughput_dec = (data_size_kb / dec_time) if dec_time > 0 else 0
+                print(f"Пропускная способность (шифр.) / Throughput (enc): {throughput_enc:.2f} KB/s")
+                print(f"Пропускная способность (расш.) / Throughput (dec): {throughput_dec:.2f} KB/s")
+                print("=" * 70)
+                print()
+                
+                # Verify correctness
+                if plaintext == decrypted:
+                    print("✓ ВЕРИФИКАЦИЯ ПРОЙДЕНА / VERIFICATION PASSED")
+                    print()
+                else:
+                    print("✗ ОШИБКА ВЕРИФИКАЦИИ / VERIFICATION FAILED")
+                    print()
+                
+                # Statistical tests
+                print("=" * 70)
+                print("СТАТИСТИЧЕСКИЕ ТЕСТЫ / STATISTICAL TESTS")
+                print("=" * 70)
+                
+                # Sample for statistics (use first 10KB max for speed)
+                sample_size = min(10240, len(plaintext))
+                plaintext_sample = plaintext[:sample_size]
+                
+                # Entropy
+                print(f"\n1. Энтропия Шеннона / Shannon Entropy:")
+                pt_entropy = shannon_entropy(plaintext_sample)
+                print(f"   Открытый текст / Plaintext:  {pt_entropy:.4f} бит/байт")
+                
+                # For ciphertext entropy, encrypt a sample
+                cipher_obj = WBC1Cipher(key, block_size=16, num_rounds=rounds)
+                # Pad sample
+                padding_length = 16 - (len(plaintext_sample) % 16)
+                if padding_length == 0 or padding_length == 16:
+                    padding_length = 16
+                padded_sample = plaintext_sample + bytes([padding_length] * padding_length)
+                
+                encrypted_blocks = []
+                for i in range(0, len(padded_sample), 16):
+                    block = padded_sample[i:i + 16]
+                    block_array = np.frombuffer(block, dtype=np.uint8).copy()
+                    encrypted_block = cipher_obj.encrypt_block(block_array)
+                    encrypted_blocks.append(encrypted_block.tobytes())
+                ciphertext_sample = b''.join(encrypted_blocks)
+                
+                ct_entropy = shannon_entropy(ciphertext_sample)
+                print(f"   Шифртекст / Ciphertext:      {ct_entropy:.4f} бит/байт")
+                print(f"   (Идеально / Ideal: 8.0 бит/байт)")
+                
+                # Frequency test
+                print(f"\n2. Частотный тест / Frequency Test:")
+                freq_stats = frequency_test(ciphertext_sample)
+                print(f"   Среднее / Mean:        {freq_stats['mean']:.2f}")
+                print(f"   Ст. откл. / Std dev:   {freq_stats['std']:.2f}")
+                print(f"   Хи-квадрат / Chi-sq:   {freq_stats['chi_square']:.2f}")
+                
+                # Avalanche effect
+                print(f"\n3. Лавинный эффект / Avalanche Effect:")
+                num_tests = min(100, sample_size // 16)  # Limit for speed
+                avalanche_results = avalanche_test(cipher_obj, num_tests=num_tests)
+                print(f"   Среднее изменение битов / Mean bit flip: {avalanche_results['mean_flip_percentage']:.2f}%")
+                print(f"   Ст. откл. / Std dev:                     {avalanche_results['std_flip_percentage']:.2f}%")
+                print(f"   Диапазон / Range: [{avalanche_results['min_flip_percentage']:.2f}%, {avalanche_results['max_flip_percentage']:.2f}%]")
+                print(f"   (Идеально / Ideal: ~50%)")
+                
+                # Correlation
+                print(f"\n4. Корреляция / Correlation:")
+                corr = correlation_test(plaintext_sample, ciphertext_sample[:len(plaintext_sample)])
+                print(f"   Корреляция открытый-шифр / PT-CT: {corr:.6f}")
+                print(f"   (Идеально / Ideal: ~0.0)")
+                
+                print()
+                print("=" * 70)
+                print("АНАЛИЗ ЗАВЕРШЕН / ANALYSIS COMPLETED")
+                print("=" * 70)
+                sys.stdout.flush()
     
     except ValueError as e:
         if rank == 0:
