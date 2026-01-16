@@ -1439,18 +1439,31 @@ def command_line_demo():
             # Broadcast plaintext to all ranks
             plaintext = comm.bcast(plaintext, root=0)
             
+            # Synchronize before encryption
+            comm.Barrier()
+            
             # Encryption
             start_enc = time.time()
             ciphertext = cipher.encrypt(plaintext)
+            comm.Barrier()
             enc_time = time.time() - start_enc
             
+            if rank == 0:
+                print(f"✓ Шифрование завершено ({len(ciphertext)} байт) / Encryption completed ({len(ciphertext)} bytes)")
+                sys.stdout.flush()
+            
             # Decryption
+            if rank == 0:
+                print("⏳ Выполняется расшифрование / Decrypting...")
+                sys.stdout.flush()
+            
             start_dec = time.time()
             decrypted = cipher.decrypt(ciphertext)
+            comm.Barrier()
             dec_time = time.time() - start_dec
             
             if rank == 0:
-                print(f"✓ Шифрование завершено / Encryption completed")
+                print(f"✓ Расшифрование завершено / Decryption completed")
                 print()
                 
                 # Performance metrics
