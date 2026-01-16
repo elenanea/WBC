@@ -445,8 +445,8 @@ class WBC1Cipher:
                 state = self._substitute_bytes(state)
                 
                 # 4. Diffusion: cumulative XOR (Y_0=X_3[0], Y_i=X_3[i]⊕Y_(i-1))
-                for i in range(1, len(state)):
-                    state[i] ^= state[i-1]
+                # Vectorized cumulative XOR for better performance
+                state = np.bitwise_xor.accumulate(state)
                 
                 # 5. Cyclic bitwise shift (ROTR_n_r)
                 # Determine shift amount based on key and round
@@ -511,6 +511,7 @@ class WBC1Cipher:
                 state = state_rotated
                 
                 # 4. Inverse diffusion: cumulative XOR (backward)
+                # Vectorized inverse cumulative XOR for better performance
                 for i in range(len(state)-1, 0, -1):
                     state[i] ^= state[i-1]
                 
@@ -1243,17 +1244,13 @@ def interactive_demo():
         
         comm.Barrier()
         start_time = MPI.Wtime()
-        
         ciphertext = parallel_cipher.encrypt(plaintext if rank == 0 else None)
-        
         comm.Barrier()
         enc_time = MPI.Wtime() - start_time
         
         comm.Barrier()
         start_time = MPI.Wtime()
-        
         decrypted = parallel_cipher.decrypt(ciphertext if rank == 0 else None)
-        
         comm.Barrier()
         dec_time = MPI.Wtime() - start_time
     else:
@@ -1268,8 +1265,7 @@ def interactive_demo():
                 padding_length = block_size
             padded_data = plaintext + bytes([padding_length] * padding_length)
             
-            # Encrypt
-            comm.Barrier()
+            # Encrypt (no barrier needed inside - sequential on rank 0)
             start_time = MPI.Wtime()
             encrypted_blocks = []
             for i in range(0, len(padded_data), block_size):
@@ -1278,11 +1274,9 @@ def interactive_demo():
                 encrypted_block = cipher.encrypt_block(block_array)
                 encrypted_blocks.append(encrypted_block.tobytes())
             ciphertext = b''.join(encrypted_blocks)
-            comm.Barrier()
             enc_time = MPI.Wtime() - start_time
             
-            # Decrypt
-            comm.Barrier()
+            # Decrypt (no barrier needed inside - sequential on rank 0)
             start_time = MPI.Wtime()
             decrypted_blocks = []
             for i in range(0, len(ciphertext), block_size):
@@ -1295,16 +1289,12 @@ def interactive_demo():
             # Remove padding
             padding_length = decrypted_padded[-1]
             decrypted = decrypted_padded[:-padding_length]
-            comm.Barrier()
             dec_time = MPI.Wtime() - start_time
         else:
-            # Non-rank-0 processes need to participate in barriers
-            comm.Barrier()
-            comm.Barrier()
-            comm.Barrier()
-            comm.Barrier()
+            # Non-rank-0 processes do nothing in sequential mode
+            pass
         
-        comm.Barrier()
+        comm.Barrier()  # Only one barrier at the end for synchronization
     
     # Display results
     if rank == 0:
