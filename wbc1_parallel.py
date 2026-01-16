@@ -1193,24 +1193,21 @@ def interactive_demo():
         # Use parallel cipher
         parallel_cipher = ParallelWBC1(key, block_size=16, num_rounds=num_rounds)
         
-        if rank == 0:
-            start_time = time.time()
+        comm.Barrier()
+        start_time = MPI.Wtime()
         
         ciphertext = parallel_cipher.encrypt(plaintext if rank == 0 else None)
         
         comm.Barrier()
+        enc_time = MPI.Wtime() - start_time
         
-        if rank == 0:
-            enc_time = time.time() - start_time
-            
-            start_time = time.time()
+        comm.Barrier()
+        start_time = MPI.Wtime()
         
         decrypted = parallel_cipher.decrypt(ciphertext if rank == 0 else None)
         
         comm.Barrier()
-        
-        if rank == 0:
-            dec_time = time.time() - start_time
+        dec_time = MPI.Wtime() - start_time
     else:
         # Use sequential cipher (only rank 0)
         if rank == 0:
@@ -1224,7 +1221,8 @@ def interactive_demo():
             padded_data = plaintext + bytes([padding_length] * padding_length)
             
             # Encrypt
-            start_time = time.time()
+            comm.Barrier()
+            start_time = MPI.Wtime()
             encrypted_blocks = []
             for i in range(0, len(padded_data), block_size):
                 block = padded_data[i:i + block_size]
@@ -1232,10 +1230,12 @@ def interactive_demo():
                 encrypted_block = cipher.encrypt_block(block_array)
                 encrypted_blocks.append(encrypted_block.tobytes())
             ciphertext = b''.join(encrypted_blocks)
-            enc_time = time.time() - start_time
+            comm.Barrier()
+            enc_time = MPI.Wtime() - start_time
             
             # Decrypt
-            start_time = time.time()
+            comm.Barrier()
+            start_time = MPI.Wtime()
             decrypted_blocks = []
             for i in range(0, len(ciphertext), block_size):
                 block = ciphertext[i:i + block_size]
@@ -1247,7 +1247,14 @@ def interactive_demo():
             # Remove padding
             padding_length = decrypted_padded[-1]
             decrypted = decrypted_padded[:-padding_length]
-            dec_time = time.time() - start_time
+            comm.Barrier()
+            dec_time = MPI.Wtime() - start_time
+        else:
+            # Non-rank-0 processes need to participate in barriers
+            comm.Barrier()
+            comm.Barrier()
+            comm.Barrier()
+            comm.Barrier()
         
         comm.Barrier()
     
@@ -1423,10 +1430,11 @@ def command_line_demo():
             
             plaintext = demo_text.encode('utf-8')
             
-            import time
-            start_enc = time.time()
+            comm.Barrier()
+            start_enc = MPI.Wtime()
             ciphertext = cipher.encrypt(plaintext)
-            end_enc = time.time()
+            comm.Barrier()
+            end_enc = MPI.Wtime()
             
             if rank == 0:
                 print()
@@ -1439,9 +1447,11 @@ def command_line_demo():
                 sys.stdout.flush()
             
             # Decryption
-            start_dec = time.time()
+            comm.Barrier()
+            start_dec = MPI.Wtime()
             decrypted = cipher.decrypt(ciphertext)
-            end_dec = time.time()
+            comm.Barrier()
+            end_dec = MPI.Wtime()
             
             if rank == 0:
                 print()
@@ -1500,10 +1510,10 @@ def command_line_demo():
             comm.Barrier()
             
             # Encryption
-            start_enc = time.time()
+            start_enc = MPI.Wtime()
             ciphertext = cipher.encrypt(plaintext)
             comm.Barrier()
-            enc_time = time.time() - start_enc
+            enc_time = MPI.Wtime() - start_enc
             
             if rank == 0:
                 print(f"✓ Шифрование завершено ({len(ciphertext)} байт) / Encryption completed ({len(ciphertext)} bytes)")
@@ -1514,10 +1524,11 @@ def command_line_demo():
                 print("⏳ Выполняется расшифрование / Decrypting...")
                 sys.stdout.flush()
             
-            start_dec = time.time()
+            comm.Barrier()
+            start_dec = MPI.Wtime()
             decrypted = cipher.decrypt(ciphertext)
             comm.Barrier()
-            dec_time = time.time() - start_dec
+            dec_time = MPI.Wtime() - start_dec
             
             if rank == 0:
                 print(f"✓ Расшифрование завершено / Decryption completed")
