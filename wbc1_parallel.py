@@ -339,7 +339,14 @@ class WBC1Cipher:
     
     def encrypt_block(self, plaintext_block: np.ndarray) -> np.ndarray:
         """
-        Encrypt a single block.
+        Encrypt a single block using optimized algorithm.
+        
+        Algorithm per round:
+        1. Dynamic Rubik's cube operation (π_r from permutation table)
+        2. XOR with round key
+        3. S-box substitution
+        4. Diffusion (cumulative XOR: Y_0=X[0], Y_i=X[i]⊕Y_(i-1))
+        5. Cyclic bitwise shift (ROTR)
         
         Args:
             plaintext_block: Input block as numpy array of uint8
@@ -352,45 +359,42 @@ class WBC1Cipher:
         
         state = plaintext_block.copy()
         
-        # Initial round key addition
-        state = self._xor_with_key(state, self.round_keys[0])
-        
-        # Main rounds with dynamic operations
-        for round_num in range(1, self.num_rounds):
-            # Apply dynamic operation based on round key
+        # Main rounds with optimized operations
+        for round_num in range(self.num_rounds):
+            # 1. Dynamic operation (π_r): Apply Rubik's cube permutation
             op_id = self.round_keys[round_num][0] % len(self.operations)
             state = self._apply_operation(state, op_id, inverse=False)
             
-            # Substitution layer
+            # 2. XOR with round key
+            state = self._xor_with_key(state, self.round_keys[round_num])
+            
+            # 3. S-box substitution
             state = self._substitute_bytes(state)
             
-            # Diffusion: cumulative XOR (forward)
+            # 4. Diffusion: cumulative XOR (Y_0=X_3[0], Y_i=X_3[i]⊕Y_(i-1))
             for i in range(1, len(state)):
                 state[i] ^= state[i-1]
             
-            # Permutation layer
-            state = self._permute_bits(state)
-            
-            # Bitwise rotation based on operation ID
-            state_flat = state.copy()
-            for i in range(len(state_flat)):
-                state_flat[i] = rotate_right(int(state_flat[i]), op_id % 8)
-            state = state_flat
-            
-            # Cyclic shift
-            state = self._rotate_left(state, round_num % self.block_size)
-            
-            # Key mixing
-            state = self._xor_with_key(state, self.round_keys[round_num])
-        
-        # Final substitution
-        state = self._substitute_bytes(state)
+            # 5. Cyclic bitwise shift (ROTR_n_r)
+            # Determine shift amount based on key and round
+            shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+            state_rotated = state.copy()
+            for i in range(len(state_rotated)):
+                state_rotated[i] = rotate_right(int(state_rotated[i]), shift_amount)
+            state = state_rotated
         
         return state
     
     def decrypt_block(self, ciphertext_block: np.ndarray) -> np.ndarray:
         """
-        Decrypt a single block.
+        Decrypt a single block using inverse of optimized algorithm.
+        
+        Inverse algorithm per round (applied in reverse order):
+        5. Inverse cyclic bitwise shift (ROTL)
+        4. Inverse diffusion (cumulative XOR backward)
+        3. Inverse S-box substitution
+        2. XOR with round key (self-inverse)
+        1. Inverse dynamic Rubik's cube operation
         
         Args:
             ciphertext_block: Input block as numpy array of uint8
@@ -403,39 +407,28 @@ class WBC1Cipher:
         
         state = ciphertext_block.copy()
         
-        # Inverse final substitution
-        state = self._inverse_substitute_bytes(state)
-        
-        # Inverse main rounds with dynamic operations
-        for round_num in range(self.num_rounds - 1, 0, -1):
-            # Inverse key mixing
-            state = self._xor_with_key(state, self.round_keys[round_num])
+        # Inverse main rounds (reverse order)
+        for round_num in range(self.num_rounds - 1, -1, -1):
+            # 5. Inverse cyclic bitwise shift (ROTL)
+            shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+            state_rotated = state.copy()
+            for i in range(len(state_rotated)):
+                state_rotated[i] = rotate_left(int(state_rotated[i]), shift_amount)
+            state = state_rotated
             
-            # Inverse cyclic shift
-            state = self._rotate_right(state, round_num % self.block_size)
-            
-            # Inverse bitwise rotation
-            op_id = self.round_keys[round_num][0] % len(self.operations)
-            state_flat = state.copy()
-            for i in range(len(state_flat)):
-                state_flat[i] = rotate_left(int(state_flat[i]), op_id % 8)
-            state = state_flat
-            
-            # Inverse permutation
-            state = self._inverse_permute_bits(state)
-            
-            # Inverse diffusion: cumulative XOR (backward)
+            # 4. Inverse diffusion: cumulative XOR (backward)
             for i in range(len(state)-1, 0, -1):
                 state[i] ^= state[i-1]
             
-            # Inverse substitution
+            # 3. Inverse S-box substitution
             state = self._inverse_substitute_bytes(state)
             
-            # Apply inverse dynamic operation
+            # 2. XOR with round key (self-inverse)
+            state = self._xor_with_key(state, self.round_keys[round_num])
+            
+            # 1. Inverse dynamic operation (π_r^-1)
+            op_id = self.round_keys[round_num][0] % len(self.operations)
             state = self._apply_operation(state, op_id, inverse=True)
-        
-        # Inverse initial round key addition
-        state = self._xor_with_key(state, self.round_keys[0])
         
         return state
 
