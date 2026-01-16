@@ -6,7 +6,6 @@ Run with: mpiexec -n <num_processes> python3 benchmark.py
 
 from mpi4py import MPI
 from wbc1_parallel import ParallelWBC1
-import time
 import numpy as np
 
 
@@ -45,17 +44,19 @@ def benchmark(num_processes, data_sizes_kb):
             warmup_data = None
         cipher.encrypt(warmup_data)
         
-        # Benchmark encryption
+        # Benchmark encryption with MPI.Wtime()
         comm.Barrier()  # Synchronize all processes
-        start_time = time.time()
+        t0 = MPI.Wtime()
         ciphertext = cipher.encrypt(data)
-        encryption_time = time.time() - start_time
-        
-        # Benchmark decryption
         comm.Barrier()
-        start_time = time.time()
+        encryption_time = MPI.Wtime() - t0
+        
+        # Benchmark decryption with MPI.Wtime()
+        comm.Barrier()
+        t0 = MPI.Wtime()
         decrypted = cipher.decrypt(ciphertext)
-        decryption_time = time.time() - start_time
+        comm.Barrier()
+        decryption_time = MPI.Wtime() - t0
         
         if rank == 0:
             # Calculate throughput
