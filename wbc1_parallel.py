@@ -168,7 +168,7 @@ def build_127_ascii_operations(key: bytes) -> list:
 class WBC1Cipher:
     """WBC1 block cipher implementation with configurable parameters."""
     
-    def __init__(self, key: bytes, block_size: int = 16, num_rounds: int = 16):
+    def __init__(self, key: bytes, block_size: int = 16, num_rounds: int = 16, algorithm_mode: int = 1):
         """
         Initialize WBC1 cipher.
         
@@ -176,10 +176,14 @@ class WBC1Cipher:
             key: Master encryption key (bytes)
             block_size: Size of each block in bytes (default: 16)
             num_rounds: Number of encryption rounds (default: 16)
+            algorithm_mode: Algorithm variant (default: 1)
+                0 = Simplified (only dynamic permutations + cyclic bitwise rotation)
+                1 = Full optimized (all 5 operations: permutation, XOR, S-box, diffusion, rotation)
         """
         self.block_size = block_size
         self.num_rounds = num_rounds
         self.key = key
+        self.algorithm_mode = algorithm_mode
         
         # Generate S-box and inverse S-box
         self.sbox = self._generate_sbox()
@@ -339,14 +343,20 @@ class WBC1Cipher:
     
     def encrypt_block(self, plaintext_block: np.ndarray) -> np.ndarray:
         """
-        Encrypt a single block using optimized algorithm.
+        Encrypt a single block.
         
-        Algorithm per round:
-        1. Dynamic Rubik's cube operation (π_r from permutation table)
-        2. XOR with round key
-        3. S-box substitution
-        4. Diffusion (cumulative XOR: Y_0=X[0], Y_i=X[i]⊕Y_(i-1))
-        5. Cyclic bitwise shift (ROTR)
+        Algorithm depends on algorithm_mode:
+        
+        Mode 0 (Simplified):
+          1. Dynamic Rubik's cube operation (π_r)
+          2. Cyclic bitwise shift (ROTR)
+        
+        Mode 1 (Full optimized):
+          1. Dynamic Rubik's cube operation (π_r from permutation table)
+          2. XOR with round key
+          3. S-box substitution
+          4. Diffusion (cumulative XOR: Y_0=X[0], Y_i=X[i]⊕Y_(i-1))
+          5. Cyclic bitwise shift (ROTR)
         
         Args:
             plaintext_block: Input block as numpy array of uint8
@@ -359,42 +369,63 @@ class WBC1Cipher:
         
         state = plaintext_block.copy()
         
-        # Main rounds with optimized operations
-        for round_num in range(self.num_rounds):
-            # 1. Dynamic operation (π_r): Apply Rubik's cube permutation
-            op_id = self.round_keys[round_num][0] % len(self.operations)
-            state = self._apply_operation(state, op_id, inverse=False)
-            
-            # 2. XOR with round key
-            state = self._xor_with_key(state, self.round_keys[round_num])
-            
-            # 3. S-box substitution
-            state = self._substitute_bytes(state)
-            
-            # 4. Diffusion: cumulative XOR (Y_0=X_3[0], Y_i=X_3[i]⊕Y_(i-1))
-            for i in range(1, len(state)):
-                state[i] ^= state[i-1]
-            
-            # 5. Cyclic bitwise shift (ROTR_n_r)
-            # Determine shift amount based on key and round
-            shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
-            state_rotated = state.copy()
-            for i in range(len(state_rotated)):
-                state_rotated[i] = rotate_right(int(state_rotated[i]), shift_amount)
-            state = state_rotated
+        if self.algorithm_mode == 0:
+            # SIMPLIFIED ALGORITHM: Only dynamic permutations + cyclic bitwise rotation
+            for round_num in range(self.num_rounds):
+                # 1. Dynamic operation (π_r): Apply Rubik's cube permutation
+                op_id = self.round_keys[round_num][0] % len(self.operations)
+                state = self._apply_operation(state, op_id, inverse=False)
+                
+                # 2. Cyclic bitwise shift (ROTR_n_r)
+                shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+                state_rotated = state.copy()
+                for i in range(len(state_rotated)):
+                    state_rotated[i] = rotate_right(int(state_rotated[i]), shift_amount)
+                state = state_rotated
+        
+        else:
+            # FULL OPTIMIZED ALGORITHM: All 5 operations
+            for round_num in range(self.num_rounds):
+                # 1. Dynamic operation (π_r): Apply Rubik's cube permutation
+                op_id = self.round_keys[round_num][0] % len(self.operations)
+                state = self._apply_operation(state, op_id, inverse=False)
+                
+                # 2. XOR with round key
+                state = self._xor_with_key(state, self.round_keys[round_num])
+                
+                # 3. S-box substitution
+                state = self._substitute_bytes(state)
+                
+                # 4. Diffusion: cumulative XOR (Y_0=X_3[0], Y_i=X_3[i]⊕Y_(i-1))
+                for i in range(1, len(state)):
+                    state[i] ^= state[i-1]
+                
+                # 5. Cyclic bitwise shift (ROTR_n_r)
+                # Determine shift amount based on key and round
+                shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+                state_rotated = state.copy()
+                for i in range(len(state_rotated)):
+                    state_rotated[i] = rotate_right(int(state_rotated[i]), shift_amount)
+                state = state_rotated
         
         return state
     
     def decrypt_block(self, ciphertext_block: np.ndarray) -> np.ndarray:
         """
-        Decrypt a single block using inverse of optimized algorithm.
+        Decrypt a single block using inverse algorithm.
         
-        Inverse algorithm per round (applied in reverse order):
-        5. Inverse cyclic bitwise shift (ROTL)
-        4. Inverse diffusion (cumulative XOR backward)
-        3. Inverse S-box substitution
-        2. XOR with round key (self-inverse)
-        1. Inverse dynamic Rubik's cube operation
+        Algorithm depends on algorithm_mode:
+        
+        Mode 0 (Simplified) - inverse order:
+          2. Inverse cyclic bitwise shift (ROTL)
+          1. Inverse dynamic Rubik's cube operation
+        
+        Mode 1 (Full optimized) - inverse order:
+          5. Inverse cyclic bitwise shift (ROTL)
+          4. Inverse diffusion (cumulative XOR backward)
+          3. Inverse S-box substitution
+          2. XOR with round key (self-inverse)
+          1. Inverse dynamic Rubik's cube operation
         
         Args:
             ciphertext_block: Input block as numpy array of uint8
@@ -407,28 +438,43 @@ class WBC1Cipher:
         
         state = ciphertext_block.copy()
         
-        # Inverse main rounds (reverse order)
-        for round_num in range(self.num_rounds - 1, -1, -1):
-            # 5. Inverse cyclic bitwise shift (ROTL)
-            shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
-            state_rotated = state.copy()
-            for i in range(len(state_rotated)):
-                state_rotated[i] = rotate_left(int(state_rotated[i]), shift_amount)
-            state = state_rotated
-            
-            # 4. Inverse diffusion: cumulative XOR (backward)
-            for i in range(len(state)-1, 0, -1):
-                state[i] ^= state[i-1]
-            
-            # 3. Inverse S-box substitution
-            state = self._inverse_substitute_bytes(state)
-            
-            # 2. XOR with round key (self-inverse)
-            state = self._xor_with_key(state, self.round_keys[round_num])
-            
-            # 1. Inverse dynamic operation (π_r^-1)
-            op_id = self.round_keys[round_num][0] % len(self.operations)
-            state = self._apply_operation(state, op_id, inverse=True)
+        if self.algorithm_mode == 0:
+            # SIMPLIFIED ALGORITHM INVERSE: Reverse order
+            for round_num in range(self.num_rounds - 1, -1, -1):
+                # 2. Inverse cyclic bitwise shift (ROTL)
+                shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+                state_rotated = state.copy()
+                for i in range(len(state_rotated)):
+                    state_rotated[i] = rotate_left(int(state_rotated[i]), shift_amount)
+                state = state_rotated
+                
+                # 1. Inverse dynamic operation
+                op_id = self.round_keys[round_num][0] % len(self.operations)
+                state = self._apply_operation(state, op_id, inverse=True)
+        
+        else:
+            # FULL OPTIMIZED ALGORITHM INVERSE: Reverse order
+            for round_num in range(self.num_rounds - 1, -1, -1):
+                # 5. Inverse cyclic bitwise shift (ROTL)
+                shift_amount = self.round_keys[round_num][1] % 8 if len(self.round_keys[round_num]) > 1 else (round_num % 8)
+                state_rotated = state.copy()
+                for i in range(len(state_rotated)):
+                    state_rotated[i] = rotate_left(int(state_rotated[i]), shift_amount)
+                state = state_rotated
+                
+                # 4. Inverse diffusion: cumulative XOR (backward)
+                for i in range(len(state)-1, 0, -1):
+                    state[i] ^= state[i-1]
+                
+                # 3. Inverse S-box substitution
+                state = self._inverse_substitute_bytes(state)
+                
+                # 2. XOR with round key (self-inverse)
+                state = self._xor_with_key(state, self.round_keys[round_num])
+                
+                # 1. Inverse dynamic operation (π_r^-1)
+                op_id = self.round_keys[round_num][0] % len(self.operations)
+                state = self._apply_operation(state, op_id, inverse=True)
         
         return state
 
@@ -436,7 +482,7 @@ class WBC1Cipher:
 class ParallelWBC1:
     """Parallel implementation of WBC1 using MPI."""
     
-    def __init__(self, key: bytes, block_size: int = 16, num_rounds: int = 16):
+    def __init__(self, key: bytes, block_size: int = 16, num_rounds: int = 16, algorithm_mode: int = 1):
         """
         Initialize parallel WBC1.
         
@@ -444,14 +490,18 @@ class ParallelWBC1:
             key: Master encryption key
             block_size: Size of each block in bytes
             num_rounds: Number of encryption rounds
+            algorithm_mode: Algorithm variant (default: 1)
+                0 = Simplified (only dynamic permutations + cyclic bitwise rotation)
+                1 = Full optimized (all 5 operations)
         """
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
         self.size = self.comm.Get_size()
         
         # Each process creates its own cipher instance with same parameters
-        self.cipher = WBC1Cipher(key, block_size, num_rounds)
+        self.cipher = WBC1Cipher(key, block_size, num_rounds, algorithm_mode)
         self.block_size = block_size
+        self.algorithm_mode = algorithm_mode
     
     def _pad_data(self, data: bytes) -> bytes:
         """Apply PKCS7 padding to data."""
@@ -1232,14 +1282,17 @@ def interactive_demo():
 def command_line_demo():
     """
     Command-line demo mode with hardcoded text.
-    Usage: mpiexec -n 4 python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task>
+    Usage: mpiexec -n 4 python3 wbc1_parallel.py <algorithm_mode> <key_size> <key_source> <rounds> <task> [data_size]
     
     Parameters:
-        mpi_mode: 0 or 1 (placeholder, not used)
+        algorithm_mode: 0 or 1
+            0 = Simplified algorithm (only dynamic permutations + cyclic bitwise rotation)
+            1 = Full optimized algorithm (all 5 operations)
         key_size: Key size in bits (128, 192, 256, etc.)
         key_source: 0=auto-generate, 1=user-provided
         rounds: Number of encryption rounds
-        task: 0=text encryption (always uses parallel mode)
+        task: 0=text encryption, 1=statistical analysis
+        data_size: Data size in KB (required for task=1)
     """
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -1254,27 +1307,37 @@ def command_line_demo():
             if rank == 0:
                 print("Error: Insufficient arguments")
                 print()
-                print("Usage: mpiexec -n <processes> python3 wbc1_parallel.py <mpi_mode> <key_size> <key_source> <rounds> <task> [data_size]")
+                print("Usage: mpiexec -n <processes> python3 wbc1_parallel.py <algorithm_mode> <key_size> <key_source> <rounds> <task> [data_size]")
                 print()
                 print("Parameters:")
-                print("  mpi_mode:   0 or 1 (placeholder)")
-                print("  key_size:   Key size in bits (128, 192, 256, etc.)")
-                print("  key_source: 0=auto-generate, 1=user-provided")
-                print("  rounds:     Number of encryption rounds")
-                print("  task:       0=text encryption, 1=statistical analysis")
-                print("  data_size:  Data size in KB (required for task=1)")
+                print("  algorithm_mode: 0 or 1")
+                print("                  0 = Simplified (only dynamic permutations + bitwise rotation)")
+                print("                  1 = Full optimized (all 5 operations)")
+                print("  key_size:       Key size in bits (128, 192, 256, etc.)")
+                print("  key_source:     0=auto-generate, 1=user-provided")
+                print("  rounds:         Number of encryption rounds")
+                print("  task:           0=text encryption, 1=statistical analysis")
+                print("  data_size:      Data size in KB (required for task=1)")
                 print()
                 print("Examples:")
-                print("  Text encryption:     mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 64 0")
-                print("  Statistical analysis: mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 64 1 1000")
+                print("  Text (simplified):    mpiexec -n 4 python3 wbc1_parallel.py 0 256 0 16 0")
+                print("  Text (full):          mpiexec -n 4 python3 wbc1_parallel.py 1 256 0 16 0")
+                print("  Statistical (simplified): mpiexec -n 8 python3 wbc1_parallel.py 0 256 0 16 1 100")
+                print("  Statistical (full):   mpiexec -n 4 python3 wbc1_parallel.py 1 256 0 64 1 1000")
                 sys.stdout.flush()
             return
         
-        mpi_mode = int(sys.argv[1])
+        algorithm_mode = int(sys.argv[1])
         key_size_bits = int(sys.argv[2])
         key_source = int(sys.argv[3])
         rounds = int(sys.argv[4])
         task = int(sys.argv[5])
+        
+        if algorithm_mode not in [0, 1]:
+            if rank == 0:
+                print(f"Error: Invalid algorithm_mode={algorithm_mode}. Must be 0 (simplified) or 1 (full)")
+                sys.stdout.flush()
+            return
         
         key_size = key_size_bits // 8
         
@@ -1303,6 +1366,7 @@ def command_line_demo():
             print(f"Количество процессов / Number of processes: {size}")
             print(f"Размер ключа / Key size: {key_size_bits} бит ({key_size} байт)")
             print(f"Источник ключа / Key source: {'пользовательский / user-provided' if key_source == 1 else 'автоматически сгенерирован / auto-generated'}")
+            print(f"Режим алгоритма / Algorithm mode: {'Упрощенный / Simplified (2 operations)' if algorithm_mode == 0 else 'Полный оптимизированный / Full optimized (5 operations)'}")
             print(f"Режим выполнения / Execution mode: Parallel MPI")
             print(f"Количество раундов / Number of rounds: {rounds}")
         
@@ -1343,8 +1407,8 @@ def command_line_demo():
             print("=" * 70)
             print()
         
-        # Create cipher instance
-        cipher = ParallelWBC1(key, block_size=16, num_rounds=rounds)
+        # Create cipher instance with algorithm mode
+        cipher = ParallelWBC1(key, block_size=16, num_rounds=rounds, algorithm_mode=algorithm_mode)
         
         if task == 0:
             # TEXT ENCRYPTION MODE
