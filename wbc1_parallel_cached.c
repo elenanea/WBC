@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <math.h>
 #include <mpi.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
@@ -651,6 +652,127 @@ void parallel_decrypt(WBC1Cipher *cipher, const uint8_t *ciphertext, int ciphert
     }
 }
 
+/* ===== Statistical Analysis Functions ===== */
+
+double shannon_entropy(const uint8_t *data, int len) {
+    if (len == 0) return 0.0;
+    
+    // Count frequency
+    int frequency[256] = {0};
+    for (int i = 0; i < len; i++) {
+        frequency[data[i]]++;
+    }
+    
+    // Calculate entropy
+    double entropy = 0.0;
+    for (int i = 0; i < 256; i++) {
+        if (frequency[i] > 0) {
+            double p = (double)frequency[i] / len;
+            entropy -= p * log2(p);
+        }
+    }
+    return entropy;
+}
+
+void avalanche_test(WBC1Cipher *cipher, int num_tests, double *results) {
+    // results should be array of size num_tests
+    // Test by flipping single bit and measuring output bit changes
+    for (int test = 0; test < num_tests; test++) {
+        uint8_t plaintext[BLOCK_SIZE];
+        uint8_t plaintext_flipped[BLOCK_SIZE];
+        uint8_t ciphertext1[BLOCK_SIZE];
+        uint8_t ciphertext2[BLOCK_SIZE];
+        
+        // Generate random plaintext
+        for (int i = 0; i < BLOCK_SIZE; i++) {
+            plaintext[i] = rand() % 256;
+            plaintext_flipped[i] = plaintext[i];
+        }
+        
+        // Flip one random bit
+        int bit_pos = rand() % (BLOCK_SIZE * 8);
+        int byte_idx = bit_pos / 8;
+        int bit_idx = bit_pos % 8;
+        plaintext_flipped[byte_idx] ^= (1 << bit_idx);
+        
+        // Encrypt both
+        wbc1_encrypt_block(cipher, plaintext, ciphertext1);
+        wbc1_encrypt_block(cipher, plaintext_flipped, ciphertext2);
+        
+        // Count bit differences
+        int bits_changed = 0;
+        for (int i = 0; i < BLOCK_SIZE; i++) {
+            uint8_t diff = ciphertext1[i] ^ ciphertext2[i];
+            for (int j = 0; j < 8; j++) {
+                if (diff & (1 << j)) bits_changed++;
+            }
+        }
+        
+        results[test] = (double)bits_changed / (BLOCK_SIZE * 8) * 100.0;
+    }
+}
+
+void frequency_test(const uint8_t *data, int len, double *mean, double *std, double *chi_square) {
+    if (len == 0) {
+        *mean = 0; *std = 0; *chi_square = 0;
+        return;
+    }
+    
+    int frequency[256] = {0};
+    for (int i = 0; i < len; i++) {
+        frequency[data[i]]++;
+    }
+    
+    // Calculate mean
+    double sum = 0;
+    for (int i = 0; i < 256; i++) {
+        sum += frequency[i];
+    }
+    *mean = sum / 256.0;
+    
+    // Calculate std dev
+    double var_sum = 0;
+    for (int i = 0; i < 256; i++) {
+        double diff = frequency[i] - *mean;
+        var_sum += diff * diff;
+    }
+    *std = sqrt(var_sum / 256.0);
+    
+    // Calculate chi-square
+    double expected = (double)len / 256.0;
+    *chi_square = 0;
+    for (int i = 0; i < 256; i++) {
+        double diff = frequency[i] - expected;
+        *chi_square += (diff * diff) / expected;
+    }
+}
+
+double correlation_test(const uint8_t *data1, const uint8_t *data2, int len) {
+    if (len == 0) return 0.0;
+    
+    // Calculate means
+    double mean1 = 0, mean2 = 0;
+    for (int i = 0; i < len; i++) {
+        mean1 += data1[i];
+        mean2 += data2[i];
+    }
+    mean1 /= len;
+    mean2 /= len;
+    
+    // Calculate correlation
+    double numerator = 0, denom1 = 0, denom2 = 0;
+    for (int i = 0; i < len; i++) {
+        double diff1 = data1[i] - mean1;
+        double diff2 = data2[i] - mean2;
+        numerator += diff1 * diff2;
+        denom1 += diff1 * diff1;
+        denom2 += diff2 * diff2;
+    }
+    
+    if (denom1 == 0 || denom2 == 0) return 0.0;
+    return numerator / sqrt(denom1 * denom2);
+}
+
 /* ===== Main Test Function ===== */
 
 int main(int argc, char **argv) {
@@ -860,6 +982,60 @@ int main(int argc, char **argv) {
             printf("✓ Encryption/Decryption successful - output matches input!\n");
         } else {
             printf("✗ Error: Decrypted text does not match original!\n");
+        }
+        
+        /* Statistical analysis for task==1 */
+        if (task == 1) {
+            printf("\n=== Statistical Analysis Results ===\n");
+            
+            // Shannon entropy
+            double entropy_plain = shannon_entropy(plaintext, plain_len);
+            double entropy_cipher = shannon_entropy(ciphertext, ciphertext_len);
+            printf("Shannon Entropy:\n");
+            printf("  Plaintext:  %.6f bits/byte\n", entropy_plain);
+            printf("  Ciphertext: %.6f bits/byte\n", entropy_cipher);
+            
+            // Avalanche test
+            printf("\nAvalanche Effect Test (100 iterations):\n");
+            double avalanche_results[100];
+            avalanche_test(&cipher, 100, avalanche_results);
+            
+            double av_sum = 0, av_min = 100, av_max = 0;
+            for (int i = 0; i < 100; i++) {
+                av_sum += avalanche_results[i];
+                if (avalanche_results[i] < av_min) av_min = avalanche_results[i];
+                if (avalanche_results[i] > av_max) av_max = avalanche_results[i];
+            }
+            double av_mean = av_sum / 100;
+            double av_var = 0;
+            for (int i = 0; i < 100; i++) {
+                double diff = avalanche_results[i] - av_mean;
+                av_var += diff * diff;
+            }
+            double av_std = sqrt(av_var / 100);
+            
+            printf("  Mean flip percentage: %.2f%%\n", av_mean);
+            printf("  Std deviation:        %.2f%%\n", av_std);
+            printf("  Min flip percentage:  %.2f%%\n", av_min);
+            printf("  Max flip percentage:  %.2f%%\n", av_max);
+            
+            // Frequency test
+            double freq_mean, freq_std, freq_chi;
+            frequency_test(ciphertext, ciphertext_len, &freq_mean, &freq_std, &freq_chi);
+            printf("\nFrequency Analysis:\n");
+            printf("  Mean frequency:   %.2f\n", freq_mean);
+            printf("  Std deviation:    %.2f\n", freq_std);
+            printf("  Chi-square value: %.2f\n", freq_chi);
+            
+            // Correlation
+            double corr = correlation_test(plaintext, decrypted, plain_len);
+            printf("\nCorrelation Test:\n");
+            printf("  Plaintext-Ciphertext correlation: %.6f\n", corr);
+            
+            // Throughput
+            double throughput = (plain_len / 1024.0) / enc_time;
+            printf("\nPerformance:\n");
+            printf("  Throughput: %.2f KB/s\n", throughput);
         }
         
         free(ciphertext);
