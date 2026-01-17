@@ -16,6 +16,13 @@
  * - Round key generation
  * - Support for Mode 0 (simplified) and Mode 1 (full algorithm)
  * - MPI parallelization for distributed block processing
+ * 
+ * THREAD SAFETY:
+ * - Each MPI process maintains its own cipher instance (no shared state)
+ * - Uses C standard library rand() with deterministic seeding (not thread-safe)
+ * - Safe for MPI processes (separate memory spaces)
+ * - NOT safe for multi-threaded use within a single process
+ * - For multi-threaded applications, use separate cipher instances per thread
  */
 
 #include <stdio.h>
@@ -450,6 +457,13 @@ void parallel_encrypt(WBC1Cipher *cipher, const uint8_t *plaintext, int plaintex
     if (rank == 0) {
         send_counts = malloc(size * sizeof(int));
         displs = malloc(size * sizeof(int));
+        if (!send_counts || !displs) {
+            fprintf(stderr, "Error: Failed to allocate memory for send counts\n");
+            if (send_counts) free(send_counts);
+            if (displs) free(displs);
+            if (padded_data) free(padded_data);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
         
         int offset = 0;
         for (int i = 0; i < size; i++) {
@@ -462,6 +476,10 @@ void parallel_encrypt(WBC1Cipher *cipher, const uint8_t *plaintext, int plaintex
     
     /* Allocate local buffer */
     uint8_t *local_blocks = malloc(local_block_count * BLOCK_SIZE);
+    if (!local_blocks) {
+        fprintf(stderr, "Error: Failed to allocate memory for local blocks\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     
     /* Scatter blocks to all processes */
     MPI_Scatterv(padded_data, send_counts, displs, MPI_UNSIGNED_CHAR,
@@ -470,6 +488,11 @@ void parallel_encrypt(WBC1Cipher *cipher, const uint8_t *plaintext, int plaintex
     
     /* Encrypt local blocks (using cached operations for performance) */
     uint8_t *encrypted_local = malloc(local_block_count * BLOCK_SIZE);
+    if (!encrypted_local) {
+        fprintf(stderr, "Error: Failed to allocate memory for encrypted blocks\n");
+        free(local_blocks);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     for (int i = 0; i < local_block_count; i++) {
         wbc1_encrypt_block(cipher, local_blocks + i * BLOCK_SIZE, 
                           encrypted_local + i * BLOCK_SIZE);
@@ -479,6 +502,12 @@ void parallel_encrypt(WBC1Cipher *cipher, const uint8_t *plaintext, int plaintex
     uint8_t *all_encrypted = NULL;
     if (rank == 0) {
         all_encrypted = malloc(num_blocks * BLOCK_SIZE);
+        if (!all_encrypted) {
+            fprintf(stderr, "Error: Failed to allocate memory for gathering encrypted blocks\n");
+            free(local_blocks);
+            free(encrypted_local);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
     }
     
     MPI_Gatherv(encrypted_local, local_block_count * BLOCK_SIZE, MPI_UNSIGNED_CHAR,
@@ -528,6 +557,12 @@ void parallel_decrypt(WBC1Cipher *cipher, const uint8_t *ciphertext, int ciphert
     if (rank == 0) {
         send_counts = malloc(size * sizeof(int));
         displs = malloc(size * sizeof(int));
+        if (!send_counts || !displs) {
+            fprintf(stderr, "Error: Failed to allocate memory for send counts\n");
+            if (send_counts) free(send_counts);
+            if (displs) free(displs);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
         
         int offset = 0;
         for (int i = 0; i < size; i++) {
@@ -540,6 +575,10 @@ void parallel_decrypt(WBC1Cipher *cipher, const uint8_t *ciphertext, int ciphert
     
     /* Allocate local buffer */
     uint8_t *local_blocks = malloc(local_block_count * BLOCK_SIZE);
+    if (!local_blocks) {
+        fprintf(stderr, "Error: Failed to allocate memory for local blocks\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     
     /* Scatter blocks to all processes */
     MPI_Scatterv(ciphertext, send_counts, displs, MPI_UNSIGNED_CHAR,
@@ -548,6 +587,11 @@ void parallel_decrypt(WBC1Cipher *cipher, const uint8_t *ciphertext, int ciphert
     
     /* Decrypt local blocks (using cached operations for performance) */
     uint8_t *decrypted_local = malloc(local_block_count * BLOCK_SIZE);
+    if (!decrypted_local) {
+        fprintf(stderr, "Error: Failed to allocate memory for decrypted blocks\n");
+        free(local_blocks);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     for (int i = 0; i < local_block_count; i++) {
         wbc1_decrypt_block(cipher, local_blocks + i * BLOCK_SIZE,
                           decrypted_local + i * BLOCK_SIZE);
@@ -557,6 +601,12 @@ void parallel_decrypt(WBC1Cipher *cipher, const uint8_t *ciphertext, int ciphert
     uint8_t *all_decrypted = NULL;
     if (rank == 0) {
         all_decrypted = malloc(num_blocks * BLOCK_SIZE);
+        if (!all_decrypted) {
+            fprintf(stderr, "Error: Failed to allocate memory for gathering decrypted blocks\n");
+            free(local_blocks);
+            free(decrypted_local);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
     }
     
     MPI_Gatherv(decrypted_local, local_block_count * BLOCK_SIZE, MPI_UNSIGNED_CHAR,
@@ -606,6 +656,11 @@ int main(int argc, char **argv) {
     int repeat_count = 4;
     int plain_len = strlen(plaintext_str) * repeat_count;
     uint8_t *plaintext = malloc(plain_len);
+    if (!plaintext) {
+        fprintf(stderr, "Error: Failed to allocate memory for test plaintext\n");
+        MPI_Finalize();
+        return 1;
+    }
     for (int i = 0; i < repeat_count; i++) {
         memcpy(plaintext + i * strlen(plaintext_str), plaintext_str, strlen(plaintext_str));
     }
