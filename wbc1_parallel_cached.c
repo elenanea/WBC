@@ -257,22 +257,24 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
     uint8_t temp[BLOCK_SIZE];
     
     /* Safety check */
-    if (cipher->block_size > BLOCK_SIZE) {
-        fprintf(stderr, "Error: Block size %d exceeds maximum %d\n", cipher->block_size, BLOCK_SIZE);
+    if (cipher->block_size > BLOCK_SIZE || cipher->block_size <= 0) {
+        fprintf(stderr, "Error: Block size %d invalid (must be 1-%d)\n", cipher->block_size, BLOCK_SIZE);
         return;
     }
     
-    memcpy(temp, block, (size_t)cipher->block_size);
-    
-    if (inverse) {
-        /* Use cached inverse permutation */
-        for (int i = 0; i < cipher->block_size; i++) {
-            block[i] = temp[cipher->operation_cache[op_id].inverse_perm[i]];
-        }
-    } else {
-        /* Use cached forward permutation */
-        for (int i = 0; i < cipher->block_size; i++) {
-            block[i] = temp[cipher->operation_cache[op_id].forward_perm[i]];
+    if (cipher->block_size > 0) {
+        memcpy(temp, block, (size_t)cipher->block_size);
+        
+        if (inverse) {
+            /* Use cached inverse permutation */
+            for (int i = 0; i < cipher->block_size; i++) {
+                block[i] = temp[cipher->operation_cache[op_id].inverse_perm[i]];
+            }
+        } else {
+            /* Use cached forward permutation */
+            for (int i = 0; i < cipher->block_size; i++) {
+                block[i] = temp[cipher->operation_cache[op_id].forward_perm[i]];
+            }
         }
     }
 }
@@ -669,7 +671,8 @@ int main(int argc, char **argv) {
      */
     int algorithm_mode = MODE_FULL;
     int key_bits = 256;
-    int key_source = 0;  /* Always auto-generate in C version */
+    /* Note: key_source is parsed for compatibility with Python interface but not used */
+    /* C version always auto-generates keys based on key_bits parameter */
     int num_rounds = 16;
     int task = 0;  /* 0=text encryption, 1=statistical analysis */
     int data_kb = 1;  /* Data size in KB for task=1 */
@@ -678,7 +681,7 @@ int main(int argc, char **argv) {
     if (argc >= 5) {
         algorithm_mode = atoi(argv[1]);
         key_bits = atoi(argv[2]);
-        key_source = atoi(argv[3]);
+        /* argv[3] is key_source, parsed but unused - kept for Python compatibility */
         num_rounds = atoi(argv[4]);
         if (argc >= 6) {
             task = atoi(argv[5]);

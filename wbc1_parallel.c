@@ -230,29 +230,35 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     uint8_t temp[BLOCK_SIZE];
     
     /* Safety check */
-    if (cipher->block_size > BLOCK_SIZE) {
-        fprintf(stderr, "Error: Block size %d exceeds maximum %d\n", cipher->block_size, BLOCK_SIZE);
+    if (cipher->block_size > BLOCK_SIZE || cipher->block_size <= 0) {
+        fprintf(stderr, "Error: Block size %d invalid (must be 1-%d)\n", cipher->block_size, BLOCK_SIZE);
         return;
     }
     
     compute_operation_permutation(cipher, op_id, perm);
     
     if (inverse) {
-        /* Compute inverse permutation */
+        /* Compute inverse permutation with bounds checking */
         for (int i = 0; i < cipher->block_size; i++) {
-            inv_perm[perm[i]] = i;
+            if (perm[i] >= 0 && perm[i] < cipher->block_size) {
+                inv_perm[perm[i]] = i;
+            }
         }
         
         /* Apply inverse permutation - only copy what's needed */
-        memcpy(temp, block, (size_t)cipher->block_size);
-        for (int i = 0; i < cipher->block_size; i++) {
-            block[i] = temp[inv_perm[i]];
+        if (cipher->block_size > 0) {
+            memcpy(temp, block, (size_t)cipher->block_size);
+            for (int i = 0; i < cipher->block_size; i++) {
+                block[i] = temp[inv_perm[i]];
+            }
         }
     } else {
         /* Apply forward permutation - only copy what's needed */
-        memcpy(temp, block, (size_t)cipher->block_size);
-        for (int i = 0; i < cipher->block_size; i++) {
-            block[i] = temp[perm[i]];
+        if (cipher->block_size > 0) {
+            memcpy(temp, block, (size_t)cipher->block_size);
+            for (int i = 0; i < cipher->block_size; i++) {
+                block[i] = temp[perm[i]];
+            }
         }
     }
 }
