@@ -657,38 +657,53 @@ double shannon_entropy(const uint8_t *data, int len) {
 void avalanche_test(WBC1Cipher *cipher, int num_tests, double *results) {
     // results should be array of size num_tests
     // Test by flipping single bit and measuring output bit changes
+    // Uses full encryption pipeline (with padding) for accurate results
     for (int test = 0; test < num_tests; test++) {
-        uint8_t plaintext[BLOCK_SIZE];
-        uint8_t plaintext_flipped[BLOCK_SIZE];
-        uint8_t ciphertext1[BLOCK_SIZE];
-        uint8_t ciphertext2[BLOCK_SIZE];
+        // Generate random plaintext (larger than block size to trigger padding)
+        int test_len = BLOCK_SIZE * 2 + 5;  // Multiple blocks + extra bytes
+        uint8_t *plaintext = (uint8_t*)malloc(test_len);
+        uint8_t *plaintext_flipped = (uint8_t*)malloc(test_len);
         
-        // Generate random plaintext
-        for (int i = 0; i < BLOCK_SIZE; i++) {
+        if (!plaintext || !plaintext_flipped) {
+            results[test] = 0.0;
+            if (plaintext) free(plaintext);
+            if (plaintext_flipped) free(plaintext_flipped);
+            continue;
+        }
+        
+        for (int i = 0; i < test_len; i++) {
             plaintext[i] = rand() % 256;
             plaintext_flipped[i] = plaintext[i];
         }
         
         // Flip one random bit
-        int bit_pos = rand() % (BLOCK_SIZE * 8);
+        int bit_pos = rand() % (test_len * 8);
         int byte_idx = bit_pos / 8;
         int bit_idx = bit_pos % 8;
         plaintext_flipped[byte_idx] ^= (1 << bit_idx);
         
-        // Encrypt both
-        wbc1_encrypt_block(cipher, plaintext, ciphertext1);
-        wbc1_encrypt_block(cipher, plaintext_flipped, ciphertext2);
+        // Encrypt both using full pipeline (with padding)
+        uint8_t *ciphertext1 = NULL, *ciphertext2 = NULL;
+        int cipher_len1 = 0, cipher_len2 = 0;
+        parallel_encrypt(cipher, plaintext, test_len, &ciphertext1, &cipher_len1);
+        parallel_encrypt(cipher, plaintext_flipped, test_len, &ciphertext2, &cipher_len2);
         
-        // Count bit differences
+        // Count bit differences in ciphertext
         int bits_changed = 0;
-        for (int i = 0; i < BLOCK_SIZE; i++) {
+        int compare_len = (cipher_len1 < cipher_len2) ? cipher_len1 : cipher_len2;
+        for (int i = 0; i < compare_len; i++) {
             uint8_t diff = ciphertext1[i] ^ ciphertext2[i];
             for (int j = 0; j < 8; j++) {
                 if (diff & (1 << j)) bits_changed++;
             }
         }
         
-        results[test] = (double)bits_changed / (BLOCK_SIZE * 8) * 100.0;
+        results[test] = (double)bits_changed / (compare_len * 8) * 100.0;
+        
+        free(plaintext);
+        free(plaintext_flipped);
+        if (ciphertext1) free(ciphertext1);
+        if (ciphertext2) free(ciphertext2);
     }
 }
 
@@ -958,17 +973,30 @@ int main(int argc, char **argv) {
         
         /* Statistical analysis for task==1 */
         if (task == 1) {
-            printf("\n=== Statistical Analysis Results ===\n");
+            printf("\n");
+            printf("=" "==========================================\n");
+            printf("  CRYPTOGRAPHIC QUALITY ANALYSIS\n");
+            printf("=" "==========================================\n\n");
             
             // Shannon entropy
             double entropy_plain = shannon_entropy(plaintext, plain_len);
             double entropy_cipher = shannon_entropy(ciphertext, ciphertext_len);
-            printf("Shannon Entropy:\n");
-            printf("  Plaintext:  %.6f bits/byte\n", entropy_plain);
-            printf("  Ciphertext: %.6f bits/byte\n", entropy_cipher);
+            printf("1. Shannon Entropy (Randomness Test)\n");
+            printf("   ────────────────────────────────\n");
+            printf("   Plaintext:   %.6f bits/byte\n", entropy_plain);
+            printf("   Ciphertext:  %.6f bits/byte", entropy_cipher);
+            if (entropy_cipher >= 7.9) {
+                printf("  ✓ EXCELLENT (≥7.9 expected)\n");
+            } else if (entropy_cipher >= 7.5) {
+                printf("  ⚠ ACCEPTABLE (7.5-7.9)\n");
+            } else {
+                printf("  ✗ POOR (<7.5)\n");
+            }
             
             // Avalanche test
-            printf("\nAvalanche Effect Test (100 iterations):\n");
+            printf("\n2. Avalanche Effect (Bit Diffusion Test)\n");
+            printf("   ────────────────────────────────────\n");
+            printf("   Testing: 1-bit input change → output bit changes\n");
             double avalanche_results[100];
             avalanche_test(&cipher, 100, avalanche_results);
             
@@ -986,28 +1014,59 @@ int main(int argc, char **argv) {
             }
             double av_std = sqrt(av_var / 100);
             
-            printf("  Mean flip percentage: %.2f%%\n", av_mean);
-            printf("  Std deviation:        %.2f%%\n", av_std);
-            printf("  Min flip percentage:  %.2f%%\n", av_min);
-            printf("  Max flip percentage:  %.2f%%\n", av_max);
+            printf("   Mean:        %.2f%%", av_mean);
+            if (av_mean >= 45.0 && av_mean <= 55.0) {
+                printf("  ✓ EXCELLENT (45-55%% expected)\n");
+            } else if (av_mean >= 40.0 && av_mean <= 60.0) {
+                printf("  ⚠ ACCEPTABLE (40-60%%)\n");
+            } else {
+                printf("  ✗ POOR (far from 50%%)\n");
+            }
+            printf("   Std Dev:     %.2f%%\n", av_std);
+            printf("   Range:       %.2f%% - %.2f%%\n", av_min, av_max);
+            printf("   Iterations:  100 tests\n");
             
             // Frequency test
             double freq_mean, freq_std, freq_chi;
             frequency_test(ciphertext, ciphertext_len, &freq_mean, &freq_std, &freq_chi);
-            printf("\nFrequency Analysis:\n");
-            printf("  Mean frequency:   %.2f\n", freq_mean);
-            printf("  Std deviation:    %.2f\n", freq_std);
-            printf("  Chi-square value: %.2f\n", freq_chi);
+            printf("\n3. Frequency Distribution Analysis\n");
+            printf("   ────────────────────────────────\n");
+            printf("   Mean frequency:   %.2f bytes/value\n", freq_mean);
+            printf("   Std deviation:    %.2f\n", freq_std);
+            printf("   Chi-square:       %.2f", freq_chi);
+            if (freq_chi < 300) {
+                printf("  ✓ GOOD (uniform distribution)\n");
+            } else {
+                printf("  ⚠ Check distribution\n");
+            }
             
             // Correlation
             double corr = correlation_test(plaintext, decrypted, plain_len);
-            printf("\nCorrelation Test:\n");
-            printf("  Plaintext-Ciphertext correlation: %.6f\n", corr);
+            printf("\n4. Correlation Test (Independence)\n");
+            printf("   ────────────────────────────────\n");
+            printf("   Plaintext-Ciphertext: %.6f", corr);
+            if (fabs(corr) < 0.1) {
+                printf("  ✓ EXCELLENT (<0.1 expected)\n");
+            } else if (fabs(corr) < 0.3) {
+                printf("  ⚠ ACCEPTABLE (0.1-0.3)\n");
+            } else {
+                printf("  ✗ POOR (>0.3, shows correlation)\n");
+            }
             
-            // Throughput
-            double throughput = (plain_len / 1024.0) / enc_time;
-            printf("\nPerformance:\n");
-            printf("  Throughput: %.2f KB/s\n", throughput);
+            // Performance summary
+            double throughput_enc = (plain_len / 1024.0) / enc_time;
+            double throughput_dec = (decrypted_len / 1024.0) / dec_time;
+            printf("\n5. Performance Metrics\n");
+            printf("   ───────────────────\n");
+            printf("   Encryption:  %.2f KB/s (%.6f sec for %d KB)\n", 
+                   throughput_enc, enc_time, plain_len/1024);
+            printf("   Decryption:  %.2f KB/s (%.6f sec for %d KB)\n",
+                   throughput_dec, dec_time, decrypted_len/1024);
+            printf("   MPI Processes: %d\n", size);
+            
+            printf("\n" "==========================================\n");
+            printf("  ANALYSIS COMPLETE\n");
+            printf("=" "==========================================\n");
         }
         
         free(ciphertext);
