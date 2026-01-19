@@ -274,8 +274,14 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     sha256_hash(chain_input, cipher->key_len + 11, chain_hash);
     int chain_length = 3 + (chain_hash[0] % 4);  /* 3-6 permutations */
     
-    /* Apply chain of permutations */
-    for (int chain_idx = 0; chain_idx < chain_length; chain_idx++) {
+    /* Apply chain of permutations
+     * CRITICAL: For decryption (inverse=1), apply chain in REVERSE order
+     * to properly undo the permutations applied during encryption */
+    int start_idx = inverse ? (chain_length - 1) : 0;
+    int end_idx = inverse ? -1 : chain_length;
+    int step = inverse ? -1 : 1;
+    
+    for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
         /* Generate unique sub-operation ID */
         int sub_op_id = (op_id * 100 + chain_idx) % (NUM_OPERATIONS * 2);
         
