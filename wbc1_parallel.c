@@ -259,29 +259,50 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
         return;
     }
     
-    compute_operation_permutation(cipher, op_id, perm);
+    /* CRITICAL FIX: Apply a CHAIN of permutations to match Python implementation
+     * Python applies 3-6 sub-permutations per operation for good diffusion
+     * This is essential for Mode 0's cryptographic strength */
     
-    if (inverse) {
-        /* Compute inverse permutation with bounds checking */
-        for (int i = 0; i < cipher->block_size; i++) {
-            if (perm[i] >= 0 && perm[i] < cipher->block_size) {
-                inv_perm[perm[i]] = i;
-            }
-        }
+    /* Determine chain length (3-6 permutations) based on op_id */
+    uint8_t chain_input[256];
+    memcpy(chain_input, cipher->key, cipher->key_len);
+    memcpy(chain_input + cipher->key_len, "CHAIN_LEN", 9);
+    chain_input[cipher->key_len + 9] = (op_id >> 8) & 0xFF;
+    chain_input[cipher->key_len + 10] = op_id & 0xFF;
+    
+    uint8_t chain_hash[SHA256_DIGEST_LENGTH];
+    sha256_hash(chain_input, cipher->key_len + 11, chain_hash);
+    int chain_length = 3 + (chain_hash[0] % 4);  /* 3-6 permutations */
+    
+    /* Apply chain of permutations */
+    for (int chain_idx = 0; chain_idx < chain_length; chain_idx++) {
+        /* Generate unique sub-operation ID */
+        int sub_op_id = (op_id * 100 + chain_idx) % (NUM_OPERATIONS * 2);
         
-        /* Apply inverse permutation - only copy what's needed */
-        if (cipher->block_size > 0) {
-            memcpy(temp, block, (size_t)cipher->block_size);
+        compute_operation_permutation(cipher, sub_op_id, perm);
+        
+        if (inverse) {
+            /* Compute inverse permutation with bounds checking */
             for (int i = 0; i < cipher->block_size; i++) {
-                block[i] = temp[inv_perm[i]];
+                if (perm[i] >= 0 && perm[i] < cipher->block_size) {
+                    inv_perm[perm[i]] = i;
+                }
             }
-        }
-    } else {
-        /* Apply forward permutation - only copy what's needed */
-        if (cipher->block_size > 0) {
-            memcpy(temp, block, (size_t)cipher->block_size);
-            for (int i = 0; i < cipher->block_size; i++) {
-                block[i] = temp[perm[i]];
+            
+            /* Apply inverse permutation - only copy what's needed */
+            if (cipher->block_size > 0) {
+                memcpy(temp, block, (size_t)cipher->block_size);
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[inv_perm[i]];
+                }
+            }
+        } else {
+            /* Apply forward permutation - only copy what's needed */
+            if (cipher->block_size > 0) {
+                memcpy(temp, block, (size_t)cipher->block_size);
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[perm[i]];
+                }
             }
         }
     }

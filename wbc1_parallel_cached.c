@@ -289,18 +289,39 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
         return;
     }
     
-    if (cipher->block_size > 0) {
-        memcpy(temp, block, (size_t)cipher->block_size);
+    /* CRITICAL FIX: Apply a CHAIN of permutations to match Python implementation
+     * Python applies 3-6 sub-permutations per operation for good diffusion
+     * This is essential for Mode 0's cryptographic strength */
+    
+    /* Determine chain length (3-6 permutations) based on op_id */
+    uint8_t chain_input[256];
+    memcpy(chain_input, cipher->key, cipher->key_len);
+    memcpy(chain_input + cipher->key_len, "CHAIN_LEN", 9);
+    chain_input[cipher->key_len + 9] = (op_id >> 8) & 0xFF;
+    chain_input[cipher->key_len + 10] = op_id & 0xFF;
+    
+    uint8_t chain_hash[SHA256_DIGEST_LENGTH];
+    sha256_hash(chain_input, cipher->key_len + 11, chain_hash);
+    int chain_length = 3 + (chain_hash[0] % 4);  /* 3-6 permutations */
+    
+    /* Apply chain of permutations */
+    for (int chain_idx = 0; chain_idx < chain_length; chain_idx++) {
+        /* Generate unique sub-operation ID */
+        int sub_op_id = ((op_id * 100 + chain_idx) % (NUM_OPERATIONS * 2)) % NUM_OPERATIONS;
         
-        if (inverse) {
-            /* Use cached inverse permutation */
-            for (int i = 0; i < cipher->block_size; i++) {
-                block[i] = temp[cipher->operation_cache[op_id].inverse_perm[i]];
-            }
-        } else {
-            /* Use cached forward permutation */
-            for (int i = 0; i < cipher->block_size; i++) {
-                block[i] = temp[cipher->operation_cache[op_id].forward_perm[i]];
+        if (cipher->block_size > 0) {
+            memcpy(temp, block, (size_t)cipher->block_size);
+            
+            if (inverse) {
+                /* Use cached inverse permutation */
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[cipher->operation_cache[sub_op_id].inverse_perm[i]];
+                }
+            } else {
+                /* Use cached forward permutation */
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[cipher->operation_cache[sub_op_id].forward_perm[i]];
+                }
             }
         }
     }
