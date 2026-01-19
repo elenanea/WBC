@@ -677,53 +677,39 @@ double shannon_entropy(const uint8_t *data, int len) {
 void avalanche_test(WBC1Cipher *cipher, int num_tests, double *results) {
     // results should be array of size num_tests
     // Test by flipping single bit and measuring output bit changes
-    // Uses full encryption pipeline (with padding) for accurate results
+    // Uses single block encryption (like Python) to test pure algorithm without padding artifacts
     for (int test = 0; test < num_tests; test++) {
-        // Generate random plaintext (larger than block size to trigger padding)
-        int test_len = BLOCK_SIZE * 2 + 5;  // Multiple blocks + extra bytes
-        uint8_t *plaintext = (uint8_t*)malloc(test_len);
-        uint8_t *plaintext_flipped = (uint8_t*)malloc(test_len);
+        // Generate random plaintext block (single block, no padding)
+        uint8_t plaintext[BLOCK_SIZE];
+        uint8_t plaintext_flipped[BLOCK_SIZE];
+        uint8_t ciphertext1[BLOCK_SIZE];
+        uint8_t ciphertext2[BLOCK_SIZE];
         
-        if (!plaintext || !plaintext_flipped) {
-            results[test] = 0.0;
-            if (plaintext) free(plaintext);
-            if (plaintext_flipped) free(plaintext_flipped);
-            continue;
-        }
-        
-        for (int i = 0; i < test_len; i++) {
+        for (int i = 0; i < BLOCK_SIZE; i++) {
             plaintext[i] = rand() % 256;
             plaintext_flipped[i] = plaintext[i];
         }
         
         // Flip one random bit
-        int bit_pos = rand() % (test_len * 8);
+        int bit_pos = rand() % (BLOCK_SIZE * 8);
         int byte_idx = bit_pos / 8;
         int bit_idx = bit_pos % 8;
         plaintext_flipped[byte_idx] ^= (1 << bit_idx);
         
-        // Encrypt both using full pipeline (with padding)
-        uint8_t *ciphertext1 = NULL, *ciphertext2 = NULL;
-        int cipher_len1 = 0, cipher_len2 = 0;
-        parallel_encrypt(cipher, plaintext, test_len, &ciphertext1, &cipher_len1);
-        parallel_encrypt(cipher, plaintext_flipped, test_len, &ciphertext2, &cipher_len2);
+        // Encrypt both using single block encryption (no padding)
+        wbc1_encrypt_block(cipher, plaintext, ciphertext1);
+        wbc1_encrypt_block(cipher, plaintext_flipped, ciphertext2);
         
         // Count bit differences in ciphertext
         int bits_changed = 0;
-        int compare_len = (cipher_len1 < cipher_len2) ? cipher_len1 : cipher_len2;
-        for (int i = 0; i < compare_len; i++) {
+        for (int i = 0; i < BLOCK_SIZE; i++) {
             uint8_t diff = ciphertext1[i] ^ ciphertext2[i];
             for (int j = 0; j < 8; j++) {
                 if (diff & (1 << j)) bits_changed++;
             }
         }
         
-        results[test] = (double)bits_changed / (compare_len * 8) * 100.0;
-        
-        free(plaintext);
-        free(plaintext_flipped);
-        if (ciphertext1) free(ciphertext1);
-        if (ciphertext2) free(ciphertext2);
+        results[test] = (double)bits_changed / (BLOCK_SIZE * 8) * 100.0;
     }
 }
 
