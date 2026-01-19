@@ -282,8 +282,11 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     int step = inverse ? -1 : 1;
     
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
-        /* Generate unique sub-operation ID using a different hash method
-         * to match Python's approach where each subop gets a completely different hash */
+        /* CRITICAL: Generate COMPLETELY independent permutation for each sub-operation
+         * to match Python's approach where each subop in chain is a unique operation
+         * with its own hash. We bypass compute_operation_permutation() to avoid
+         * double-hashing that reduces entropy diversity. */
+        
         uint8_t subop_input[256];
         memcpy(subop_input, cipher->key, cipher->key_len);
         memcpy(subop_input + cipher->key_len, "SUBOP", 5);
@@ -295,10 +298,37 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
         sha256_hash(subop_input, cipher->key_len + 9, subop_hash);
         
-        /* Use hash to create sub_op_id */
-        int sub_op_id = (subop_hash[0] << 8) | subop_hash[1];
+        /* Initialize permutation array */
+        for (int i = 0; i < cipher->block_size; i++) {
+            perm[i] = i;
+        }
         
-        compute_operation_permutation(cipher, sub_op_id, perm);
+        /* Initialize xorshift128+ directly from subop_hash to get maximum diversity */
+        uint64_t state[2];
+        memcpy(&state[0], subop_hash, 8);
+        memcpy(&state[1], subop_hash + 8, 8);
+        
+        /* Ensure non-zero state for xorshift128+ */
+        if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
+        if (state[1] == 0) state[1] = 0xFEDCBA987654321ULL;
+        
+        /* Fisher-Yates shuffle using xorshift128+ */
+        for (int i = cipher->block_size - 1; i > 0; i--) {
+            uint64_t s1 = state[0];
+            uint64_t s0 = state[1];
+            state[0] = s0;
+            s1 ^= s1 << 23;
+            s1 ^= s1 >> 17;
+            s1 ^= s0;
+            s1 ^= s0 >> 26;
+            state[1] = s1;
+            uint64_t result = s0 + s1;
+            
+            int j = result % (i + 1);
+            int temp = perm[i];
+            perm[i] = perm[j];
+            perm[j] = temp;
+        }
         
         if (inverse) {
             /* Compute inverse permutation with bounds checking */
