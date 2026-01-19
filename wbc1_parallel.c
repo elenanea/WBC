@@ -681,6 +681,22 @@ void avalanche_test(WBC1Cipher *cipher, int num_tests, double *results) {
     // results should be array of size num_tests
     // Test by flipping single bit and measuring output bit changes
     // Uses single block encryption (like Python) to test pure algorithm without padding artifacts
+    
+    // Seed random number generator for test data generation
+    // Use /dev/urandom for high-quality random seed
+    FILE *urandom = fopen("/dev/urandom", "rb");
+    unsigned int seed;
+    if (urandom) {
+        if (fread(&seed, sizeof(seed), 1, urandom) == 1) {
+            srand(seed);
+        } else {
+            srand((unsigned int)time(NULL));
+        }
+        fclose(urandom);
+    } else {
+        srand((unsigned int)time(NULL));
+    }
+    
     for (int test = 0; test < num_tests; test++) {
         // Generate random plaintext block (single block, no padding)
         uint8_t plaintext[BLOCK_SIZE];
