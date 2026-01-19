@@ -353,10 +353,8 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
     
     for (int round = 0; round < cipher->num_rounds; round++) {
         /* 1. Dynamic Rubik's cube operation */
-        /* Use multiple bytes from round_key to ensure operation diversity across rounds */
-        int op_id = (cipher->round_keys[round][0] + 
-                     (cipher->round_keys[round][1] << 8) + 
-                     round) % NUM_OPERATIONS;
+        /* Use first byte of round_key (SHA-256 ensures diversity across rounds) */
+        int op_id = cipher->round_keys[round][0] % NUM_OPERATIONS;
         apply_operation(cipher, ciphertext, op_id, 0);
         
         if (cipher->algorithm_mode == MODE_FULL) {
@@ -396,10 +394,8 @@ void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *
         }
         
         /* 1. Inverse dynamic Rubik's cube operation */
-        /* Use multiple bytes from round_key to ensure operation diversity across rounds */
-        int op_id = (cipher->round_keys[round][0] + 
-                     (cipher->round_keys[round][1] << 8) + 
-                     round) % NUM_OPERATIONS;
+        /* Use first byte of round_key (SHA-256 ensures diversity across rounds) */
+        int op_id = cipher->round_keys[round][0] % NUM_OPERATIONS;
         apply_operation(cipher, plaintext, op_id, 1);
     }
 }
