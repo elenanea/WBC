@@ -282,8 +282,21 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     int step = inverse ? -1 : 1;
     
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
-        /* Generate unique sub-operation ID */
-        int sub_op_id = (op_id * 100 + chain_idx) % (NUM_OPERATIONS * 2);
+        /* Generate unique sub-operation ID using a different hash method
+         * to match Python's approach where each subop gets a completely different hash */
+        uint8_t subop_input[256];
+        memcpy(subop_input, cipher->key, cipher->key_len);
+        memcpy(subop_input + cipher->key_len, "SUBOP", 5);
+        subop_input[cipher->key_len + 5] = (op_id >> 8) & 0xFF;
+        subop_input[cipher->key_len + 6] = op_id & 0xFF;
+        subop_input[cipher->key_len + 7] = (chain_idx >> 8) & 0xFF;
+        subop_input[cipher->key_len + 8] = chain_idx & 0xFF;
+        
+        uint8_t subop_hash[SHA256_DIGEST_LENGTH];
+        sha256_hash(subop_input, cipher->key_len + 9, subop_hash);
+        
+        /* Use hash to create sub_op_id */
+        int sub_op_id = (subop_hash[0] << 8) | subop_hash[1];
         
         compute_operation_permutation(cipher, sub_op_id, perm);
         
