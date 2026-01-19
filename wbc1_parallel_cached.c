@@ -1098,8 +1098,8 @@ int main(int argc, char **argv) {
                 printf("  ⚠ Check distribution\n");
             }
             
-            // Correlation
-            double corr = correlation_test(plaintext, decrypted, plain_len);
+            // Correlation - compare plaintext with ciphertext (should be low)
+            double corr = correlation_test(plaintext, ciphertext, plain_len < ciphertext_len ? plain_len : ciphertext_len);
             printf("\n4. Correlation Test (Independence)\n");
             printf("   ────────────────────────────────\n");
             printf("   Plaintext-Ciphertext: %.6f", corr);
