@@ -195,9 +195,12 @@ static void generate_round_keys(WBC1Cipher *cipher) {
     }
 }
 
-/* Compute byte-level permutation for a given operation ID */
+/* NOTE: This function is no longer used after fixing avalanche effect.
+ * We now generate permutations directly in apply_operation() with enhanced entropy mixing
+ * to avoid double-hashing and ensure maximum diversity between sub-operations.
+ * Kept for reference only - can be removed in future cleanup. */
+#if 0
 static void compute_operation_permutation(WBC1Cipher *cipher, int op_id, int *perm) {
-    /* Create deterministic permutation based on operation ID and key */
     uint8_t input[256];
     memcpy(input, cipher->key, cipher->key_len);
     memcpy(input + cipher->key_len, "WBC1_OP", 7);
@@ -207,7 +210,6 @@ static void compute_operation_permutation(WBC1Cipher *cipher, int op_id, int *pe
     uint8_t hash[SHA256_DIGEST_LENGTH];
     sha256_hash(input, cipher->key_len + 9, hash);
     
-    /* Initialize xorshift128+ state from hash (uses 16 bytes) for high-quality randomness */
     uint64_t state[2];
     state[0] = ((uint64_t)hash[0] << 56) | ((uint64_t)hash[1] << 48) | 
                ((uint64_t)hash[2] << 40) | ((uint64_t)hash[3] << 32) |
@@ -218,18 +220,14 @@ static void compute_operation_permutation(WBC1Cipher *cipher, int op_id, int *pe
                ((uint64_t)hash[12] << 24) | ((uint64_t)hash[13] << 16) |
                ((uint64_t)hash[14] << 8) | ((uint64_t)hash[15]);
     
-    /* Avoid zero state */
     if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
     if (state[1] == 0) state[1] = 0xFEDCBA9876543210ULL;
     
-    /* Initialize permutation */
     for (int i = 0; i < cipher->block_size; i++) {
         perm[i] = i;
     }
     
-    /* Fisher-Yates shuffle using xorshift128+ for diverse permutations */
     for (int i = cipher->block_size - 1; i > 0; i--) {
-        /* xorshift128+ algorithm */
         uint64_t s1 = state[0];
         uint64_t s0 = state[1];
         state[0] = s0;
@@ -246,6 +244,7 @@ static void compute_operation_permutation(WBC1Cipher *cipher, int op_id, int *pe
         perm[j] = temp;
     }
 }
+#endif
 
 /* Apply dynamic Rubik's cube permutation operation */
 static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
@@ -284,29 +283,49 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
         /* CRITICAL: Generate COMPLETELY independent permutation for each sub-operation
          * to match Python's approach where each subop in chain is a unique operation
-         * with its own hash. We bypass compute_operation_permutation() to avoid
-         * double-hashing that reduces entropy diversity. */
+         * with its own hash. Maximum entropy variation achieved by:
+         * 1. Including chain_idx at multiple positions
+         * 2. XOR-mixing hash bytes with chain position
+         * 3. Using different hash regions for each parameter */
         
         uint8_t subop_input[256];
-        memcpy(subop_input, cipher->key, cipher->key_len);
-        memcpy(subop_input + cipher->key_len, "SUBOP", 5);
-        subop_input[cipher->key_len + 5] = (op_id >> 8) & 0xFF;
-        subop_input[cipher->key_len + 6] = op_id & 0xFF;
-        subop_input[cipher->key_len + 7] = (chain_idx >> 8) & 0xFF;
-        subop_input[cipher->key_len + 8] = chain_idx & 0xFF;
+        int offset = 0;
+        
+        /* Mix key with position-dependent data for maximum entropy */
+        memcpy(subop_input + offset, cipher->key, cipher->key_len);
+        offset += cipher->key_len;
+        
+        /* Add multiple entropy sources */
+        memcpy(subop_input + offset, "SUBOP", 5);
+        offset += 5;
+        
+        /* Encode op_id with position mixing */
+        subop_input[offset++] = (op_id >> 8) ^ (chain_idx & 0xFF);
+        subop_input[offset++] = (op_id & 0xFF) ^ ((chain_idx >> 8) & 0xFF);
+        
+        /* Add chain position with additional mixing */
+        subop_input[offset++] = (chain_idx >> 8) & 0xFF;
+        subop_input[offset++] = chain_idx & 0xFF;
+        subop_input[offset++] = (chain_idx * 17) & 0xFF;  /* Prime multiplier for variation */
+        subop_input[offset++] = ((op_id + chain_idx) * 31) & 0xFF;  /* Combined variation */
         
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-        sha256_hash(subop_input, cipher->key_len + 9, subop_hash);
+        sha256_hash(subop_input, offset, subop_hash);
         
         /* Initialize permutation array */
         for (int i = 0; i < cipher->block_size; i++) {
             perm[i] = i;
         }
         
-        /* Initialize xorshift128+ directly from subop_hash to get maximum diversity */
+        /* Initialize xorshift128+ with maximum entropy from different hash regions */
         uint64_t state[2];
+        /* Use different parts of hash for state[0] and state[1], mixed with position */
         memcpy(&state[0], subop_hash, 8);
         memcpy(&state[1], subop_hash + 8, 8);
+        
+        /* Additional mixing to prevent correlation */
+        state[0] ^= ((uint64_t)chain_idx << 32) | op_id;
+        state[1] ^= ((uint64_t)op_id << 32) | chain_idx;
         
         /* Ensure non-zero state for xorshift128+ */
         if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;

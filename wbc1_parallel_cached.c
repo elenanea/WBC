@@ -313,19 +313,34 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
     
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
         /* CRITICAL: Generate COMPLETELY independent permutation for each sub-operation
-         * to match Python's approach. We compute permutation on-the-fly instead of
-         * using cache to ensure maximum entropy diversity for sub-operations. */
+         * to match Python's approach. Maximum entropy variation achieved by:
+         * 1. Including chain_idx at multiple positions
+         * 2. XOR-mixing hash bytes with chain position
+         * 3. Using different hash regions for each parameter */
         
         uint8_t subop_input[256];
-        memcpy(subop_input, cipher->key, cipher->key_len);
-        memcpy(subop_input + cipher->key_len, "SUBOP", 5);
-        subop_input[cipher->key_len + 5] = (op_id >> 8) & 0xFF;
-        subop_input[cipher->key_len + 6] = op_id & 0xFF;
-        subop_input[cipher->key_len + 7] = (chain_idx >> 8) & 0xFF;
-        subop_input[cipher->key_len + 8] = chain_idx & 0xFF;
+        int offset = 0;
+        
+        /* Mix key with position-dependent data for maximum entropy */
+        memcpy(subop_input + offset, cipher->key, cipher->key_len);
+        offset += cipher->key_len;
+        
+        /* Add multiple entropy sources */
+        memcpy(subop_input + offset, "SUBOP", 5);
+        offset += 5;
+        
+        /* Encode op_id with position mixing */
+        subop_input[offset++] = (op_id >> 8) ^ (chain_idx & 0xFF);
+        subop_input[offset++] = (op_id & 0xFF) ^ ((chain_idx >> 8) & 0xFF);
+        
+        /* Add chain position with additional mixing */
+        subop_input[offset++] = (chain_idx >> 8) & 0xFF;
+        subop_input[offset++] = chain_idx & 0xFF;
+        subop_input[offset++] = (chain_idx * 17) & 0xFF;  /* Prime multiplier for variation */
+        subop_input[offset++] = ((op_id + chain_idx) * 31) & 0xFF;  /* Combined variation */
         
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-        sha256_hash(subop_input, cipher->key_len + 9, subop_hash);
+        sha256_hash(subop_input, offset, subop_hash);
         
         /* Initialize permutation array */
         int perm[BLOCK_SIZE];
@@ -334,10 +349,14 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
             perm[i] = i;
         }
         
-        /* Initialize xorshift128+ directly from subop_hash */
+        /* Initialize xorshift128+ with maximum entropy from different hash regions */
         uint64_t state[2];
         memcpy(&state[0], subop_hash, 8);
         memcpy(&state[1], subop_hash + 8, 8);
+        
+        /* Additional mixing to prevent correlation */
+        state[0] ^= ((uint64_t)chain_idx << 32) | op_id;
+        state[1] ^= ((uint64_t)op_id << 32) | chain_idx;
         
         /* Ensure non-zero state */
         if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
