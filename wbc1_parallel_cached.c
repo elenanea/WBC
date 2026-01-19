@@ -312,32 +312,49 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
     int step = inverse ? -1 : 1;
     
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
-        /* CRITICAL: Generate COMPLETELY independent permutation for each sub-operation
-         * to match Python's approach. Maximum entropy variation achieved by:
-         * 1. Including chain_idx at multiple positions
-         * 2. XOR-mixing hash bytes with chain position
-         * 3. Using different hash regions for each parameter */
+        /* CRITICAL FIX: Generate COMPLETELY INDEPENDENT operation ID for each chain position
+         * Python implementation: each subop in chain is picked from a list of pre-generated 
+         * operations, so each has a COMPLETELY DIFFERENT operation tuple.
+         * 
+         * Solution: Hash (key + op_id + chain_idx) to get a sub_op_id, then use that
+         * sub_op_id (NOT op_id) to generate the permutation. This ensures each position
+         * in the chain references a completely different "operation" */
         
-        uint8_t subop_input[256];
+        uint8_t subop_seed_input[256];
         int offset = 0;
         
-        /* Mix key with position-dependent data for maximum entropy */
+        memcpy(subop_seed_input + offset, cipher->key, cipher->key_len);
+        offset += cipher->key_len;
+        memcpy(subop_seed_input + offset, "WBC1_SUBOP", 10);
+        offset += 10;
+        subop_seed_input[offset++] = (op_id >> 8) & 0xFF;
+        subop_seed_input[offset++] = op_id & 0xFF;
+        subop_seed_input[offset++] = (chain_idx >> 8) & 0xFF;
+        subop_seed_input[offset++] = chain_idx & 0xFF;
+        
+        uint8_t subop_seed_hash[SHA256_DIGEST_LENGTH];
+        sha256_hash(subop_seed_input, offset, subop_seed_hash);
+        
+        /* Extract sub_op_id from hash - this is our "independent operation" reference */
+        int sub_op_id = ((int)subop_seed_hash[0] << 24) | 
+                        ((int)subop_seed_hash[1] << 16) |
+                        ((int)subop_seed_hash[2] << 8) | 
+                        ((int)subop_seed_hash[3]);
+        if (sub_op_id < 0) sub_op_id = -sub_op_id;
+        
+        /* Now generate permutation using sub_op_id (NOT op_id) */
+        uint8_t subop_input[256];
+        offset = 0;
+        
         memcpy(subop_input + offset, cipher->key, cipher->key_len);
         offset += cipher->key_len;
-        
-        /* Add multiple entropy sources */
-        memcpy(subop_input + offset, "SUBOP", 5);
-        offset += 5;
-        
-        /* Encode op_id with position mixing */
-        subop_input[offset++] = (op_id >> 8) ^ (chain_idx & 0xFF);
-        subop_input[offset++] = (op_id & 0xFF) ^ ((chain_idx >> 8) & 0xFF);
-        
-        /* Add chain position with additional mixing */
-        subop_input[offset++] = (chain_idx >> 8) & 0xFF;
-        subop_input[offset++] = chain_idx & 0xFF;
-        subop_input[offset++] = (chain_idx * 17) & 0xFF;  /* Prime multiplier for variation */
-        subop_input[offset++] = ((op_id + chain_idx) * 31) & 0xFF;  /* Combined variation */
+        memcpy(subop_input + offset, "WBC1_OP", 7);
+        offset += 7;
+        /* Use sub_op_id here, not op_id - this is the key difference */
+        subop_input[offset++] = (sub_op_id >> 24) & 0xFF;
+        subop_input[offset++] = (sub_op_id >> 16) & 0xFF;
+        subop_input[offset++] = (sub_op_id >> 8) & 0xFF;
+        subop_input[offset++] = sub_op_id & 0xFF;
         
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
         sha256_hash(subop_input, offset, subop_hash);
@@ -349,14 +366,10 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
             perm[i] = i;
         }
         
-        /* Initialize xorshift128+ with maximum entropy from different hash regions */
+        /* Initialize xorshift128+ from subop_hash */
         uint64_t state[2];
         memcpy(&state[0], subop_hash, 8);
         memcpy(&state[1], subop_hash + 8, 8);
-        
-        /* Additional mixing to prevent correlation */
-        state[0] ^= ((uint64_t)chain_idx << 32) | op_id;
-        state[1] ^= ((uint64_t)op_id << 32) | chain_idx;
         
         /* Ensure non-zero state */
         if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
