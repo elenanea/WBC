@@ -214,6 +214,8 @@ static void generate_round_keys(WBC1Cipher *cipher) {
  * PRE-COMPUTE AND CACHE ALL OPERATION PERMUTATIONS
  * This is the key optimization: compute all permutations once during initialization
  * instead of recomputing them for every block encryption/decryption.
+ * 
+ * Uses xorshift128+ PRNG for high-quality, diverse permutations across all operations.
  */
 static void precompute_operation_cache(WBC1Cipher *cipher) {
     for (int op_id = 0; op_id < NUM_OPERATIONS; op_id++) {
@@ -227,17 +229,40 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
         uint8_t hash[SHA256_DIGEST_LENGTH];
         sha256_hash(input, cipher->key_len + 9, hash);
         
-        uint32_t seed = (hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3];
+        /* Initialize xorshift128+ state from hash (uses 16 bytes) */
+        uint64_t state[2];
+        state[0] = ((uint64_t)hash[0] << 56) | ((uint64_t)hash[1] << 48) | 
+                   ((uint64_t)hash[2] << 40) | ((uint64_t)hash[3] << 32) |
+                   ((uint64_t)hash[4] << 24) | ((uint64_t)hash[5] << 16) |
+                   ((uint64_t)hash[6] << 8) | ((uint64_t)hash[7]);
+        state[1] = ((uint64_t)hash[8] << 56) | ((uint64_t)hash[9] << 48) | 
+                   ((uint64_t)hash[10] << 40) | ((uint64_t)hash[11] << 32) |
+                   ((uint64_t)hash[12] << 24) | ((uint64_t)hash[13] << 16) |
+                   ((uint64_t)hash[14] << 8) | ((uint64_t)hash[15]);
+        
+        /* Avoid zero state */
+        if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
+        if (state[1] == 0) state[1] = 0xFEDCBA9876543210ULL;
         
         /* Initialize forward permutation */
         for (int i = 0; i < cipher->block_size; i++) {
             cipher->operation_cache[op_id].forward_perm[i] = i;
         }
         
-        /* Fisher-Yates shuffle */
-        srand(seed);
+        /* Fisher-Yates shuffle using xorshift128+ */
         for (int i = cipher->block_size - 1; i > 0; i--) {
-            int j = rand() % (i + 1);
+            /* xorshift128+ algorithm */
+            uint64_t s1 = state[0];
+            uint64_t s0 = state[1];
+            state[0] = s0;
+            s1 ^= s1 << 23;
+            s1 ^= s1 >> 17;
+            s1 ^= s0;
+            s1 ^= s0 >> 26;
+            state[1] = s1;
+            uint64_t result = s0 + s1;
+            
+            int j = result % (i + 1);
             int temp = cipher->operation_cache[op_id].forward_perm[i];
             cipher->operation_cache[op_id].forward_perm[i] = cipher->operation_cache[op_id].forward_perm[j];
             cipher->operation_cache[op_id].forward_perm[j] = temp;

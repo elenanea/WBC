@@ -207,17 +207,40 @@ static void compute_operation_permutation(WBC1Cipher *cipher, int op_id, int *pe
     uint8_t hash[SHA256_DIGEST_LENGTH];
     sha256_hash(input, cipher->key_len + 9, hash);
     
-    uint32_t seed = (hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3];
+    /* Initialize xorshift128+ state from hash (uses 16 bytes) for high-quality randomness */
+    uint64_t state[2];
+    state[0] = ((uint64_t)hash[0] << 56) | ((uint64_t)hash[1] << 48) | 
+               ((uint64_t)hash[2] << 40) | ((uint64_t)hash[3] << 32) |
+               ((uint64_t)hash[4] << 24) | ((uint64_t)hash[5] << 16) |
+               ((uint64_t)hash[6] << 8) | ((uint64_t)hash[7]);
+    state[1] = ((uint64_t)hash[8] << 56) | ((uint64_t)hash[9] << 48) | 
+               ((uint64_t)hash[10] << 40) | ((uint64_t)hash[11] << 32) |
+               ((uint64_t)hash[12] << 24) | ((uint64_t)hash[13] << 16) |
+               ((uint64_t)hash[14] << 8) | ((uint64_t)hash[15]);
+    
+    /* Avoid zero state */
+    if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
+    if (state[1] == 0) state[1] = 0xFEDCBA9876543210ULL;
     
     /* Initialize permutation */
     for (int i = 0; i < cipher->block_size; i++) {
         perm[i] = i;
     }
     
-    /* Fisher-Yates shuffle */
-    srand(seed);
+    /* Fisher-Yates shuffle using xorshift128+ for diverse permutations */
     for (int i = cipher->block_size - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
+        /* xorshift128+ algorithm */
+        uint64_t s1 = state[0];
+        uint64_t s0 = state[1];
+        state[0] = s0;
+        s1 ^= s1 << 23;
+        s1 ^= s1 >> 17;
+        s1 ^= s0;
+        s1 ^= s0 >> 26;
+        state[1] = s1;
+        uint64_t result = s0 + s1;
+        
+        int j = result % (i + 1);
         int temp = perm[i];
         perm[i] = perm[j];
         perm[j] = temp;
