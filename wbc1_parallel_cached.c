@@ -1481,29 +1481,21 @@ int main(int argc, char **argv) {
                 
                 // Create cipher with modified key
                 WBC1Cipher modified_cipher;
-                wbc1_init(&modified_cipher, modified_key, 32);
+                wbc1_init(&modified_cipher, modified_key, 32, num_rounds, algorithm_mode);
                 
-                // Encrypt with modified key
-                unsigned char *modified_ciphertext = (unsigned char *)malloc(ciphertext_len);
-                memcpy(modified_ciphertext, plaintext, plain_len);
-                
-                for (size_t i = 0; i < num_blocks; i++) {
-                    int start = i * block_size;
-                    int end = (start + block_size > plain_len) ? plain_len : start + block_size;
-                    int actual_block = end - start;
-                    
-                    unsigned char block_data[4096];
-                    memcpy(block_data, plaintext + start, actual_block);
-                    if (actual_block < block_size) {
-                        memset(block_data + actual_block, 0, block_size - actual_block);
-                    }
-                    
-                    wbc1_encrypt_block(&modified_cipher, block_data, block_size, algorithm_mode);
-                    memcpy(modified_ciphertext + start, block_data, actual_block);
+                // Encrypt single block with modified key
+                unsigned char modified_ciphertext[256];
+                unsigned char test_block[256];
+                memcpy(test_block, plaintext, (plain_len < 256) ? plain_len : 256);
+                if (plain_len < 256) {
+                    memset(test_block + plain_len, 0, 256 - plain_len);
                 }
                 
-                // Count bit differences
-                for (int byte_idx = 0; byte_idx < ciphertext_len; byte_idx++) {
+                wbc1_encrypt_block(&modified_cipher, test_block, modified_ciphertext);
+                
+                // Count bit differences in first block
+                int block_len = (ciphertext_len < 256) ? ciphertext_len : 256;
+                for (int byte_idx = 0; byte_idx < block_len; byte_idx++) {
                     unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
                     // Count set bits in diff
                     while (diff) {
@@ -1512,7 +1504,6 @@ int main(int argc, char **argv) {
                     }
                 }
                 
-                free(modified_ciphertext);
                 wbc1_free(&modified_cipher);
             }
             
