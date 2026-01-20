@@ -743,25 +743,20 @@ static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round
             }
         }
     } else {
-        /* Inverse Layer 2 */
+        /* Inverse Layer 2 (XOR is self-inverse when order doesn't matter) */
         if (size >= 4) {
-            for (int i = size - 1; i >= 0; i--) {
+            for (int i = 0; i < size; i++) {
                 block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
             }
         }
         
-        /* Inverse Layer 1 */
-        uint8_t first = block[0];
-        uint8_t last = block[size - 1];
-        for (int i = 0; i < size - 1; i++) {
-            first ^= block[i + 1] ^ round_key[i % 32];
-        }
-        last ^= first ^ round_key[(size - 1) % 32];
+        /* Inverse Layer 1 - properly reverse the forward operation */
+        uint8_t saved_last = block[size - 1];
+        block[size - 1] ^= block[0] ^ round_key[(size - 1) % 32];
         
-        for (int i = size - 1; i > 0; i--) {
-            block[i] ^= block[i - 1] ^ round_key[(i - 1) % 32];
+        for (int i = size - 2; i >= 0; i--) {
+            block[i] ^= (i == size - 2 ? saved_last : block[i + 1]) ^ round_key[i % 32];
         }
-        block[0] = first;
     }
 }
 
