@@ -101,6 +101,59 @@ static void unpad_data(const uint8_t *data, int len, uint8_t **unpadded, int *un
 
 /* ===== Helper Function Implementations ===== */
 
+/* Mersenne Twister MT19937 implementation to match numpy.random.RandomState */
+#define MT_N 624
+#define MT_M 397
+#define MT_MATRIX_A 0x9908b0dfUL
+#define MT_UPPER_MASK 0x80000000UL
+#define MT_LOWER_MASK 0x7fffffffUL
+
+typedef struct {
+    uint32_t mt[MT_N];
+    int mti;
+} MT19937State;
+
+static void mt_init(MT19937State *state, uint32_t seed) {
+    state->mt[0] = seed & 0xffffffffUL;
+    for (state->mti = 1; state->mti < MT_N; state->mti++) {
+        state->mt[state->mti] = 
+            (1812433253UL * (state->mt[state->mti-1] ^ (state->mt[state->mti-1] >> 30)) + state->mti);
+        state->mt[state->mti] &= 0xffffffffUL;
+    }
+}
+
+static uint32_t mt_random(MT19937State *state) {
+    uint32_t y;
+    static uint32_t mag01[2] = {0x0UL, MT_MATRIX_A};
+    
+    if (state->mti >= MT_N) {
+        int kk;
+        
+        for (kk = 0; kk < MT_N - MT_M; kk++) {
+            y = (state->mt[kk] & MT_UPPER_MASK) | (state->mt[kk+1] & MT_LOWER_MASK);
+            state->mt[kk] = state->mt[kk+MT_M] ^ (y >> 1) ^ mag01[y & 0x1UL];
+        }
+        for (; kk < MT_N-1; kk++) {
+            y = (state->mt[kk] & MT_UPPER_MASK) | (state->mt[kk+1] & MT_LOWER_MASK);
+            state->mt[kk] = state->mt[kk+(MT_M-MT_N)] ^ (y >> 1) ^ mag01[y & 0x1UL];
+        }
+        y = (state->mt[MT_N-1] & MT_UPPER_MASK) | (state->mt[0] & MT_LOWER_MASK);
+        state->mt[MT_N-1] = state->mt[MT_M-1] ^ (y >> 1) ^ mag01[y & 0x1UL];
+        
+        state->mti = 0;
+    }
+    
+    y = state->mt[state->mti++];
+    
+    /* Tempering */
+    y ^= (y >> 11);
+    y ^= (y << 7) & 0x9d2c5680UL;
+    y ^= (y << 15) & 0xefc60000UL;
+    y ^= (y >> 18);
+    
+    return y;
+}
+
 static uint8_t rotate_right(uint8_t byte, int n) {
     n = n % 8;
     return ((byte >> n) | (byte << (8 - n))) & 0xFF;
@@ -143,10 +196,12 @@ static void generate_sbox(WBC1Cipher *cipher) {
         cipher->sbox[i] = i;
     }
     
-    /* Fisher-Yates shuffle with seeded RNG */
-    srand(seed);
+    /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.RandomState) */
+    MT19937State mt_state;
+    mt_init(&mt_state, seed);
     for (int i = 255; i > 0; i--) {
-        int j = rand() % (i + 1);
+        uint32_t rand_val = mt_random(&mt_state);
+        int j = rand_val % (i + 1);
         uint8_t temp = cipher->sbox[i];
         cipher->sbox[i] = cipher->sbox[j];
         cipher->sbox[j] = temp;
@@ -175,10 +230,12 @@ static void generate_permutation(WBC1Cipher *cipher) {
         cipher->perm_table[i] = i;
     }
     
-    /* Fisher-Yates shuffle */
-    srand(seed);
+    /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.RandomState) */
+    MT19937State mt_state;
+    mt_init(&mt_state, seed);
     for (int i = total_bits - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
+        uint32_t rand_val = mt_random(&mt_state);
+        int j = rand_val % (i + 1);
         int temp = cipher->perm_table[i];
         cipher->perm_table[i] = cipher->perm_table[j];
         cipher->perm_table[j] = temp;
@@ -216,7 +273,7 @@ static void generate_round_keys(WBC1Cipher *cipher) {
  * This is the key optimization: compute all permutations once during initialization
  * instead of recomputing them for every block encryption/decryption.
  * 
- * Uses xorshift128+ PRNG for high-quality, diverse permutations across all operations.
+ * Uses Mersenne Twister MT19937 PRNG to match numpy.random.RandomState.
  */
 static void precompute_operation_cache(WBC1Cipher *cipher) {
     for (int op_id = 0; op_id < NUM_OPERATIONS; op_id++) {
@@ -230,40 +287,24 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
         uint8_t hash[SHA256_DIGEST_LENGTH];
         sha256_hash(input, cipher->key_len + 9, hash);
         
-        /* Initialize xorshift128+ state from hash (uses 16 bytes) */
-        uint64_t state[2];
-        state[0] = ((uint64_t)hash[0] << 56) | ((uint64_t)hash[1] << 48) | 
-                   ((uint64_t)hash[2] << 40) | ((uint64_t)hash[3] << 32) |
-                   ((uint64_t)hash[4] << 24) | ((uint64_t)hash[5] << 16) |
-                   ((uint64_t)hash[6] << 8) | ((uint64_t)hash[7]);
-        state[1] = ((uint64_t)hash[8] << 56) | ((uint64_t)hash[9] << 48) | 
-                   ((uint64_t)hash[10] << 40) | ((uint64_t)hash[11] << 32) |
-                   ((uint64_t)hash[12] << 24) | ((uint64_t)hash[13] << 16) |
-                   ((uint64_t)hash[14] << 8) | ((uint64_t)hash[15]);
+        /* Extract 32-bit seed from hash (same as Python: int.from_bytes(op_hash[:4], 'big')) */
+        uint32_t seed = ((uint32_t)hash[0] << 24) | 
+                        ((uint32_t)hash[1] << 16) |
+                        ((uint32_t)hash[2] << 8) | 
+                        ((uint32_t)hash[3]);
         
-        /* Avoid zero state */
-        if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
-        if (state[1] == 0) state[1] = 0xFEDCBA9876543210ULL;
+        MT19937State mt_state;
+        mt_init(&mt_state, seed);
         
         /* Initialize forward permutation */
         for (int i = 0; i < cipher->block_size; i++) {
             cipher->operation_cache[op_id].forward_perm[i] = i;
         }
         
-        /* Fisher-Yates shuffle using xorshift128+ */
+        /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.shuffle) */
         for (int i = cipher->block_size - 1; i > 0; i--) {
-            /* xorshift128+ algorithm */
-            uint64_t s1 = state[0];
-            uint64_t s0 = state[1];
-            state[0] = s0;
-            s1 ^= s1 << 23;
-            s1 ^= s1 >> 17;
-            s1 ^= s0;
-            s1 ^= s0 >> 26;
-            state[1] = s1;
-            uint64_t result = s0 + s1;
-            
-            int j = result % (i + 1);
+            uint32_t rand_val = mt_random(&mt_state);
+            int j = rand_val % (i + 1);
             int temp = cipher->operation_cache[op_id].forward_perm[i];
             cipher->operation_cache[op_id].forward_perm[i] = cipher->operation_cache[op_id].forward_perm[j];
             cipher->operation_cache[op_id].forward_perm[j] = temp;
@@ -366,28 +407,20 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
             perm[i] = i;
         }
         
-        /* Initialize xorshift128+ from subop_hash */
-        uint64_t state[2];
-        memcpy(&state[0], subop_hash, 8);
-        memcpy(&state[1], subop_hash + 8, 8);
+        /* CRITICAL FIX: Use Mersenne Twister MT19937 to match numpy.random.RandomState */
+        /* Extract 32-bit seed from hash (same as Python: int.from_bytes(op_hash[:4], 'big')) */
+        uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
+                        ((uint32_t)subop_hash[1] << 16) |
+                        ((uint32_t)subop_hash[2] << 8) | 
+                        ((uint32_t)subop_hash[3]);
         
-        /* Ensure non-zero state */
-        if (state[0] == 0) state[0] = 0x123456789ABCDEF0ULL;
-        if (state[1] == 0) state[1] = 0xFEDCBA987654321ULL;
+        MT19937State mt_state;
+        mt_init(&mt_state, seed);
         
-        /* Fisher-Yates shuffle using xorshift128+ */
+        /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.shuffle) */
         for (int i = cipher->block_size - 1; i > 0; i--) {
-            uint64_t s1 = state[0];
-            uint64_t s0 = state[1];
-            state[0] = s0;
-            s1 ^= s1 << 23;
-            s1 ^= s1 >> 17;
-            s1 ^= s0;
-            s1 ^= s0 >> 26;
-            state[1] = s1;
-            uint64_t result = s0 + s1;
-            
-            int j = result % (i + 1);
+            uint32_t rand_val = mt_random(&mt_state);
+            int j = rand_val % (i + 1);
             int temp_swap = perm[i];
             perm[i] = perm[j];
             perm[j] = temp_swap;
