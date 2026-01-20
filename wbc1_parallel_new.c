@@ -856,9 +856,9 @@ static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round
             }
         }
     } else {
-        /* Inverse Layer 2 (XOR is self-inverse when order doesn't matter) */
+        /* Inverse Layer 2 - must be done in reverse order due to circular dependencies */
         if (size >= 4) {
-            for (int i = 0; i < size; i++) {
+            for (int i = size - 1; i >= 0; i--) {
                 block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
             }
         }
