@@ -1464,10 +1464,73 @@ int main(int argc, char **argv) {
                 printf("  ✗ POOR (>0.3, shows correlation)\n");
             }
             
+            // Differential test - key sensitivity  
+            printf("\n5. Differential Test (Key Sensitivity)\n");
+            printf("   ────────────────────────────────────\n");
+            printf("   Testing: 1-bit key change → output bit changes\n");
+            
+            int total_flips = 0;
+            int total_bits = ciphertext_len * 8;
+            
+            // Test all 256 bits of the key (32 bytes * 8 bits)
+            for (int bit_pos = 0; bit_pos < 256; bit_pos++) {
+                // Create modified key with single bit flipped
+                unsigned char modified_key[32];
+                memcpy(modified_key, key, 32);
+                modified_key[bit_pos / 8] ^= (1 << (bit_pos % 8));
+                
+                // Create cipher with modified key
+                WBC1Cipher modified_cipher;
+                wbc1_init(&modified_cipher, modified_key, 32);
+                
+                // Encrypt with modified key
+                unsigned char *modified_ciphertext = (unsigned char *)malloc(ciphertext_len);
+                memcpy(modified_ciphertext, plaintext, plain_len);
+                
+                for (size_t i = 0; i < num_blocks; i++) {
+                    int start = i * block_size;
+                    int end = (start + block_size > plain_len) ? plain_len : start + block_size;
+                    int actual_block = end - start;
+                    
+                    unsigned char block_data[4096];
+                    memcpy(block_data, plaintext + start, actual_block);
+                    if (actual_block < block_size) {
+                        memset(block_data + actual_block, 0, block_size - actual_block);
+                    }
+                    
+                    wbc1_encrypt_block(&modified_cipher, block_data, block_size, algorithm_mode);
+                    memcpy(modified_ciphertext + start, block_data, actual_block);
+                }
+                
+                // Count bit differences
+                for (int byte_idx = 0; byte_idx < ciphertext_len; byte_idx++) {
+                    unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
+                    // Count set bits in diff
+                    while (diff) {
+                        total_flips += diff & 1;
+                        diff >>= 1;
+                    }
+                }
+                
+                free(modified_ciphertext);
+                wbc1_free(&modified_cipher);
+            }
+            
+            double diff_effect = (double)total_flips / (256.0 * total_bits);
+            printf("   Mean:        %.2f%%", diff_effect * 100.0);
+            if (diff_effect * 100.0 >= 45.0 && diff_effect * 100.0 <= 55.0) {
+                printf("  ✓ EXCELLENT (45-55%% expected)\n");
+            } else if (diff_effect * 100.0 >= 40.0 && diff_effect * 100.0 <= 60.0) {
+                printf("  ⚠ ACCEPTABLE (40-60%%)\n");
+            } else {
+                printf("  ✗ POOR (far from 50%%)\n");
+            }
+            printf("   Key bits tested: 256\n");
+            
             // Performance summary
             double throughput_enc = (plain_len / 1024.0) / enc_time;
             double throughput_dec = (decrypted_len / 1024.0) / dec_time;
-            printf("\n5. Performance Metrics\n");
+            printf("\n6. Performance Metrics\n");
             printf("   ───────────────────\n");
             printf("   Encryption:  %.2f KB/s (%.6f sec for %d KB)\n", 
                    throughput_enc, enc_time, plain_len/1024);

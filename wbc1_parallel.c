@@ -1550,6 +1550,62 @@ int main(int argc, char **argv) {
             printf("   Корреляция открытый-шифр / PT-CT: %.6f\n", corr);
             printf("   (Идеально / Ideal: ~0.0)\n");
             
+            // Differential test - key sensitivity
+            printf("\n5. Дифференциальный тест / Differential Test:\n");
+            printf("   Тестирование чувствительности к изменению ключа...\n");
+            printf("   Testing key sensitivity to single bit flips...\n");
+            
+            int total_flips = 0;
+            int total_bits = ciphertext_len * 8;
+            
+            // Test all 256 bits of the key (32 bytes * 8 bits)
+            for (int bit_pos = 0; bit_pos < 256; bit_pos++) {
+                // Create modified key with single bit flipped
+                unsigned char modified_key[32];
+                memcpy(modified_key, key, 32);
+                modified_key[bit_pos / 8] ^= (1 << (bit_pos % 8));
+                
+                // Create cipher with modified key
+                WBC1Cipher modified_cipher;
+                wbc1_init(&modified_cipher, modified_key, 32);
+                
+                // Encrypt with modified key
+                unsigned char *modified_ciphertext = (unsigned char *)malloc(ciphertext_len);
+                memcpy(modified_ciphertext, plaintext, plain_len);
+                
+                for (size_t i = 0; i < num_blocks; i++) {
+                    int start = i * block_size;
+                    int end = (start + block_size > plain_len) ? plain_len : start + block_size;
+                    int actual_block = end - start;
+                    
+                    unsigned char block_data[4096];
+                    memcpy(block_data, plaintext + start, actual_block);
+                    if (actual_block < block_size) {
+                        memset(block_data + actual_block, 0, block_size - actual_block);
+                    }
+                    
+                    wbc1_encrypt_block(&modified_cipher, block_data, block_size, algorithm_mode);
+                    memcpy(modified_ciphertext + start, block_data, actual_block);
+                }
+                
+                // Count bit differences
+                for (int byte_idx = 0; byte_idx < ciphertext_len; byte_idx++) {
+                    unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
+                    // Count set bits in diff
+                    while (diff) {
+                        total_flips += diff & 1;
+                        diff >>= 1;
+                    }
+                }
+                
+                free(modified_ciphertext);
+                wbc1_free(&modified_cipher);
+            }
+            
+            double diff_effect = (double)total_flips / (256.0 * total_bits);
+            printf("   Изменение выходных битов / Output bit changes: %.2f%%\n", diff_effect * 100.0);
+            printf("   (Идеально / Ideal: ~50%% изменений при 1-битном изменении ключа)\n");
+            
             printf("\n");
             printf("======================================================================\n");
             printf("АНАЛИЗ ЗАВЕРШЕН / ANALYSIS COMPLETED\n");
