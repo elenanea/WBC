@@ -428,6 +428,7 @@ static void init_operations(WBC1Cipher *cipher, const uint8_t *key, int key_len)
             if (!is_duplicate && seen_count < MAX_SEEN) {
                 /* Chain is unique - add to seen set and use it */
                 strncpy(seen_chains[seen_count].chain_str, chain_serialized, sizeof(seen_chains[seen_count].chain_str) - 1);
+                seen_chains[seen_count].chain_str[sizeof(seen_chains[seen_count].chain_str) - 1] = '\0';  /* Ensure null termination */
                 seen_chains[seen_count].in_use = 1;
                 seen_count++;
                 
