@@ -22,13 +22,23 @@ NUM_PROCS = 4
 # Source files
 SRC_BASIC = wbc1_parallel.c
 SRC_CACHED = wbc1_parallel_cached.c
+SRC_BASIC_NEW = wbc1_parallel_new.c
+SRC_CACHED_NEW = wbc1_parallel_cached_new.c
 
 # Output binaries
 BIN_BASIC = wbc1_parallel
 BIN_CACHED = wbc1_parallel_cached
+BIN_BASIC_NEW = wbc1_parallel_new
+BIN_CACHED_NEW = wbc1_parallel_cached_new
 
 # Default target
 all: basic cached
+
+# Build all versions including new enhanced versions
+all-new: basic cached new
+
+# Build enhanced versions
+new: basic-new cached-new
 
 # Build basic version
 basic: $(BIN_BASIC)
@@ -42,12 +52,27 @@ cached: $(BIN_CACHED)
 $(BIN_CACHED): $(SRC_CACHED)
 	$(MPICC) $(CFLAGS) -o $(BIN_CACHED) $(SRC_CACHED) $(LDFLAGS)
 
+# Build enhanced basic version (Mode 0 improvements)
+basic-new: $(BIN_BASIC_NEW)
+
+$(BIN_BASIC_NEW): $(SRC_BASIC_NEW)
+	$(MPICC) $(CFLAGS) -o $(BIN_BASIC_NEW) $(SRC_BASIC_NEW) $(LDFLAGS)
+
+# Build enhanced cached version (Mode 0 improvements)
+cached-new: $(BIN_CACHED_NEW)
+
+$(BIN_CACHED_NEW): $(SRC_CACHED_NEW)
+	$(MPICC) $(CFLAGS) -o $(BIN_CACHED_NEW) $(SRC_CACHED_NEW) $(LDFLAGS)
+
 # Clean build artifacts
 clean:
-	rm -f $(BIN_BASIC) $(BIN_CACHED) *.o
+	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) *.o
 
 # Run tests
 test: test-basic test-cached
+
+# Run tests for enhanced versions
+test-new: test-basic-new test-cached-new
 
 test-basic: $(BIN_BASIC)
 	@echo "========================================"
@@ -71,6 +96,30 @@ test-cached: $(BIN_CACHED)
 	@echo ""
 	@echo "Test 2: Mode 0 (Simplified algorithm) with 16 rounds"
 	mpirun -n $(NUM_PROCS) ./$(BIN_CACHED) 0 16
+	@echo ""
+
+test-basic-new: $(BIN_BASIC_NEW)
+	@echo "========================================"
+	@echo "Testing ENHANCED Basic Parallel Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Mode 1 (Full algorithm) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_BASIC_NEW) 1 16
+	@echo ""
+	@echo "Test 2: Mode 0 (ENHANCED Simplified - should show improved avalanche!) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_BASIC_NEW) 0 16
+	@echo ""
+
+test-cached-new: $(BIN_CACHED_NEW)
+	@echo "========================================"
+	@echo "Testing ENHANCED Cached/Optimized Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Mode 1 (Full algorithm) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_CACHED_NEW) 1 16
+	@echo ""
+	@echo "Test 2: Mode 0 (ENHANCED Simplified - should show improved avalanche!) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_CACHED_NEW) 0 16
 	@echo ""
 
 # Benchmark both versions
