@@ -81,8 +81,9 @@ typedef struct {
     int num_rounds;
     int algorithm_mode;
     
-    /* CACHED OPERATIONS: Pre-computed permutations for all 127 operations */
-    OperationCache operation_cache[NUM_OPERATIONS];
+    /* CACHED BASE OPERATIONS: Pre-computed permutations for base operations only (not chains) */
+    OperationCache *base_op_cache;  /* Dynamically allocated array for g_base_ops_count operations */
+    int cache_size;
 } WBC1Cipher;
 
 /* Helper function prototypes */
@@ -508,27 +509,28 @@ static void generate_round_keys(WBC1Cipher *cipher) {
  * Uses Mersenne Twister MT19937 PRNG to match numpy.random.RandomState.
  */
 static void precompute_operation_cache(WBC1Cipher *cipher) {
-    for (int op_id = 0; op_id < NUM_OPERATIONS; op_id++) {
-        /* CRITICAL FIX: Use operation's string representation (matching Python's str(op))
-         * Python: op_hash = hashlib.sha256(str(op).encode() + self.key).digest()
-         * where str(op) = "('face', 'U', '', 'Rotate U face ')" or similar
-         * 
-         * C: Use g_operations[op_id].str_repr + key */
-        uint8_t input[512];  /* Increased size for string representation */
-        int offset = 0;
+    /* Cache only BASE operations (those without chains or with base-only chains)
+     * We cache g_base_operations[] which includes 87 base ops + 20 dynamic_20 ops = 107 total
+     * The final 127 operations are chains that reference these, so we don't cache them */
+    
+    cipher->cache_size = g_base_ops_count;
+    cipher->base_op_cache = malloc(cipher->cache_size * sizeof(OperationCache));
+    if (!cipher->base_op_cache) {
+        fprintf(stderr, "Error: Failed to allocate operation cache\n");
+        return;
+    }
+    
+    for (int op_idx = 0; op_idx < cipher->cache_size; op_idx++) {
+        Operation *op = &g_base_operations[op_idx];
         
-        /* Copy operation string representation (matches Python's str(op)) */
-        const char *op_str = g_operations[op_id].str_repr;
-        int op_str_len = strlen(op_str);
-        memcpy(input + offset, op_str, op_str_len);
-        offset += op_str_len;
-        
-        /* Append key (matches Python: str(op).encode() + self.key) */
-        memcpy(input + offset, cipher->key, cipher->key_len);
-        offset += cipher->key_len;
+        /* Generate permutation from operation's string representation + key */
+        uint8_t input[512];
+        int op_str_len = strlen(op->str_repr);
+        memcpy(input, op->str_repr, op_str_len);
+        memcpy(input + op_str_len, cipher->key, cipher->key_len);
         
         uint8_t hash[SHA256_DIGEST_LENGTH];
-        sha256_hash(input, offset, hash);
+        sha256_hash(input, op_str_len + cipher->key_len, hash);
         
         /* Extract 32-bit seed from hash (same as Python: int.from_bytes(op_hash[:4], 'big')) */
         uint32_t seed = ((uint32_t)hash[0] << 24) | 
@@ -541,33 +543,30 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
         
         /* Initialize forward permutation */
         for (int i = 0; i < cipher->block_size; i++) {
-            cipher->operation_cache[op_id].forward_perm[i] = i;
+            cipher->base_op_cache[op_idx].forward_perm[i] = i;
         }
         
         /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.shuffle) */
         for (int i = cipher->block_size - 1; i > 0; i--) {
             uint32_t rand_val = mt_random(&mt_state);
             int j = rand_val % (i + 1);
-            int temp = cipher->operation_cache[op_id].forward_perm[i];
-            cipher->operation_cache[op_id].forward_perm[i] = cipher->operation_cache[op_id].forward_perm[j];
-            cipher->operation_cache[op_id].forward_perm[j] = temp;
+            int temp = cipher->base_op_cache[op_idx].forward_perm[i];
+            cipher->base_op_cache[op_idx].forward_perm[i] = cipher->base_op_cache[op_idx].forward_perm[j];
+            cipher->base_op_cache[op_idx].forward_perm[j] = temp;
         }
         
         /* Compute and cache inverse permutation */
         for (int i = 0; i < cipher->block_size; i++) {
-            cipher->operation_cache[op_id].inverse_perm[cipher->operation_cache[op_id].forward_perm[i]] = i;
+            cipher->base_op_cache[op_idx].inverse_perm[cipher->base_op_cache[op_idx].forward_perm[i]] = i;
         }
     }
 }
 
 /* 
- * Apply dynamic Rubik's cube permutation operation using CACHED permutation
- * This eliminates SHA-256 computation and permutation generation per block
+ * Apply dynamic Rubik's cube permutation operation using CACHED base operation permutations
+ * This eliminates SHA-256 computation and MT19937 shuffle for base operations
  */
-/* Apply dynamic Rubik's cube permutation operation using pre-generated chains */
 static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
-    int perm[BLOCK_SIZE];
-    int inv_perm[BLOCK_SIZE];
     uint8_t temp[BLOCK_SIZE];
     
     /* Safety check */
@@ -576,7 +575,7 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
         return;
     }
     
-    /* Get the operation (all 127 operations have pre-generated chains) */
+    /* Get the operation (all 127 final operations have pre-generated chains) */
     Operation *op = &g_operations[op_id];
     int chain_length = op->chain_length;
     
@@ -609,102 +608,28 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
                 int nested_subop_idx = subop->chain[sub_idx];
                 if (nested_subop_idx < 0 || nested_subop_idx >= g_base_ops_count) continue;
                 
-                Operation *nested_subop = &g_base_operations[nested_subop_idx];
-                
-                /* Generate permutation from nested sub-operation's string representation + key */
-                uint8_t subop_input[512];
-                int op_str_len = strlen(nested_subop->str_repr);
-                memcpy(subop_input, nested_subop->str_repr, op_str_len);
-                memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-                
-                uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-                sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-                
-                /* Initialize permutation */
-                for (int i = 0; i < cipher->block_size; i++) {
-                    perm[i] = i;
-                }
-                
-                /* Use MT19937 to match numpy.random.RandomState */
-                uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                               ((uint32_t)subop_hash[1] << 16) |
-                               ((uint32_t)subop_hash[2] << 8) | 
-                               ((uint32_t)subop_hash[3]);
-                
-                MT19937State mt_state;
-                mt_init(&mt_state, seed);
-                
-                /* Fisher-Yates shuffle */
-                for (int i = cipher->block_size - 1; i > 0; i--) {
-                    uint32_t rand_val = mt_random(&mt_state);
-                    int j = rand_val % (i + 1);
-                    int tmp = perm[i];
-                    perm[i] = perm[j];
-                    perm[j] = tmp;
-                }
-                
-                /* Apply permutation */
+                /* Use CACHED permutation for base operation */
+                memcpy(temp, block, cipher->block_size);
                 if (inverse) {
                     for (int i = 0; i < cipher->block_size; i++) {
-                        inv_perm[perm[i]] = i;
-                    }
-                    memcpy(temp, block, (size_t)cipher->block_size);
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[inv_perm[i]];
+                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].inverse_perm[i]];
                     }
                 } else {
-                    memcpy(temp, block, (size_t)cipher->block_size);
                     for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[perm[i]];
+                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].forward_perm[i]];
                     }
                 }
             }
         } else {
-            /* Base operation - generate permutation from string representation + key */
-            uint8_t subop_input[512];
-            int op_str_len = strlen(subop->str_repr);
-            memcpy(subop_input, subop->str_repr, op_str_len);
-            memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-            
-            uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-            sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-            
-            /* Initialize permutation */
-            for (int i = 0; i < cipher->block_size; i++) {
-                perm[i] = i;
-            }
-            
-            /* Use MT19937 to match numpy.random.RandomState */
-            uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                           ((uint32_t)subop_hash[1] << 16) |
-                           ((uint32_t)subop_hash[2] << 8) | 
-                           ((uint32_t)subop_hash[3]);
-            
-            MT19937State mt_state;
-            mt_init(&mt_state, seed);
-            
-            /* Fisher-Yates shuffle */
-            for (int i = cipher->block_size - 1; i > 0; i--) {
-                uint32_t rand_val = mt_random(&mt_state);
-                int j = rand_val % (i + 1);
-                int tmp = perm[i];
-                perm[i] = perm[j];
-                perm[j] = tmp;
-            }
-            
-            /* Apply permutation */
+            /* Base operation without chain - use CACHED permutation */
+            memcpy(temp, block, cipher->block_size);
             if (inverse) {
                 for (int i = 0; i < cipher->block_size; i++) {
-                    inv_perm[perm[i]] = i;
-                }
-                memcpy(temp, block, (size_t)cipher->block_size);
-                for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[inv_perm[i]];
+                    block[i] = temp[cipher->base_op_cache[subop_idx].inverse_perm[i]];
                 }
             } else {
-                memcpy(temp, block, (size_t)cipher->block_size);
                 for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[perm[i]];
+                    block[i] = temp[cipher->base_op_cache[subop_idx].forward_perm[i]];
                 }
             }
         }
@@ -753,6 +678,8 @@ void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_roun
     /* Initialize operations array (once) with metadata matching Python */
     init_operations(key, key_len);
     
+    cipher->base_op_cache = NULL;  /* Initialize to NULL before allocation */
+    cipher->cache_size = 0;
     cipher->key = malloc(key_len);
     memcpy(cipher->key, key, key_len);
     cipher->key_len = key_len;
@@ -774,6 +701,10 @@ void wbc1_free(WBC1Cipher *cipher) {
     if (cipher->key) {
         free(cipher->key);
         cipher->key = NULL;
+    }
+    if (cipher->base_op_cache) {
+        free(cipher->base_op_cache);
+        cipher->base_op_cache = NULL;
     }
 }
 
@@ -1307,9 +1238,24 @@ int main(int argc, char **argv) {
             MPI_Finalize();
             return 1;
         }
-        /* Fill with pseudo-random data */
-        for (int i = 0; i < plain_len; i++) {
-            plaintext[i] = (uint8_t)(i * 13 + 7);
+        /* Fill with truly random data for statistical analysis */
+        FILE *urandom = fopen("/dev/urandom", "rb");
+        if (urandom) {
+            size_t bytes_read = fread(plaintext, 1, plain_len, urandom);
+            if (bytes_read != (size_t)plain_len) {
+                /* Fallback: use time-seeded PRNG */
+                srand((unsigned int)time(NULL) ^ rank);
+                for (int i = 0; i < plain_len; i++) {
+                    plaintext[i] = (uint8_t)rand();
+                }
+            }
+            fclose(urandom);
+        } else {
+            /* Fallback: use time-seeded PRNG */
+            srand((unsigned int)time(NULL) ^ rank);
+            for (int i = 0; i < plain_len; i++) {
+                plaintext[i] = (uint8_t)rand();
+            }
         }
     } else {
         /* Text encryption mode - use demo text */

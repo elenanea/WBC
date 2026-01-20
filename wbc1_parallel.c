@@ -1274,9 +1274,24 @@ int main(int argc, char **argv) {
             MPI_Finalize();
             return 1;
         }
-        /* Fill with pseudo-random data */
-        for (int i = 0; i < plain_len; i++) {
-            plaintext[i] = (uint8_t)(i * 13 + 7);
+        /* Fill with truly random data for statistical analysis */
+        FILE *urandom = fopen("/dev/urandom", "rb");
+        if (urandom) {
+            size_t bytes_read = fread(plaintext, 1, plain_len, urandom);
+            if (bytes_read != (size_t)plain_len) {
+                /* Fallback: use time-seeded PRNG */
+                srand((unsigned int)time(NULL) ^ rank);
+                for (int i = 0; i < plain_len; i++) {
+                    plaintext[i] = (uint8_t)rand();
+                }
+            }
+            fclose(urandom);
+        } else {
+            /* Fallback: use time-seeded PRNG */
+            srand((unsigned int)time(NULL) ^ rank);
+            for (int i = 0; i < plain_len; i++) {
+                plaintext[i] = (uint8_t)rand();
+            }
         }
     } else {
         /* Text encryption mode - use demo text */
