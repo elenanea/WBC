@@ -1556,7 +1556,9 @@ int main(int argc, char **argv) {
             printf("   Testing key sensitivity to single bit flips...\n");
             
             long long total_flips = 0;
-            int total_bits = ciphertext_len * 8;
+            // Only compare actual block size that gets encrypted (BLOCK_SIZE = 16 bytes)
+            int test_block_size = BLOCK_SIZE;
+            int total_bits = test_block_size * 8;
             
             // Test all 256 bits of the key (32 bytes * 8 bits)
             for (int bit_pos = 0; bit_pos < 256; bit_pos++) {
@@ -1570,18 +1572,17 @@ int main(int argc, char **argv) {
                 wbc1_init(&modified_cipher, modified_key, 32, num_rounds, algorithm_mode);
                 
                 // Encrypt single block with modified key
-                unsigned char modified_ciphertext[256];
-                unsigned char test_block[256];
-                memcpy(test_block, plaintext, (plain_len < 256) ? plain_len : 256);
-                if (plain_len < 256) {
-                    memset(test_block + plain_len, 0, 256 - plain_len);
+                unsigned char modified_ciphertext[BLOCK_SIZE];
+                unsigned char test_block[BLOCK_SIZE];
+                memcpy(test_block, plaintext, (plain_len < BLOCK_SIZE) ? plain_len : BLOCK_SIZE);
+                if (plain_len < BLOCK_SIZE) {
+                    memset(test_block + plain_len, 0, BLOCK_SIZE - plain_len);
                 }
                 
                 wbc1_encrypt_block(&modified_cipher, test_block, modified_ciphertext);
                 
-                // Count bit differences in first block
-                int block_len = (ciphertext_len < 256) ? ciphertext_len : 256;
-                for (int byte_idx = 0; byte_idx < block_len; byte_idx++) {
+                // Count bit differences in encrypted block (only BLOCK_SIZE bytes)
+                for (int byte_idx = 0; byte_idx < test_block_size; byte_idx++) {
                     unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
                     // Count set bits in diff
                     while (diff) {
