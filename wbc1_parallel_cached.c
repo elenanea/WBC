@@ -198,7 +198,8 @@ static void sha256_hash(const uint8_t *data, size_t len, uint8_t *output) {
 }
 
 /* Initialize operations array with metadata matching Python's build_127_ascii_operations */
-static void init_operations(const uint8_t *key, int key_len) {
+static void init_operations(const uint8_t *key __attribute__((unused)), 
+                            int key_len __attribute__((unused))) {
     if (g_operations_initialized) return;
     
     int op_idx = 0;
@@ -278,7 +279,7 @@ static void init_operations(const uint8_t *key, int key_len) {
     for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
         snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "diagflip");
         snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
-        snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "");
+        g_operations[op_idx].param2[0] = '\0';  /* Empty string */
         snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Diagonal flip axis=%d", axis);
         snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                 "('diagflip', %d, '', 'Diagonal flip axis=%d')", axis, axis);

@@ -181,7 +181,8 @@ static void sha256_hash(const uint8_t *data, size_t len, uint8_t *output) {
 }
 
 /* Initialize operations array with metadata matching Python's build_127_ascii_operations */
-static void init_operations(const uint8_t *key, int key_len) {
+static void init_operations(const uint8_t *key __attribute__((unused)), 
+                            int key_len __attribute__((unused))) {
     if (g_operations_initialized) return;
     
     int op_idx = 0;
@@ -261,7 +262,7 @@ static void init_operations(const uint8_t *key, int key_len) {
     for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
         snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "diagflip");
         snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
-        snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "");
+        g_operations[op_idx].param2[0] = '\0';  /* Empty string */
         snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Diagonal flip axis=%d", axis);
         snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                 "('diagflip', %d, '', 'Diagonal flip axis=%d')", axis, axis);
@@ -491,20 +492,20 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
          * 
          * C: Use g_operations[sub_op_id].str_repr + key */
         uint8_t subop_input[512];  /* Increased size for string representation */
-        int offset = 0;
+        int offset2 = 0;
         
         /* Copy operation string representation (matches Python's str(op)) */
         const char *op_str = g_operations[sub_op_id].str_repr;
         int op_str_len = strlen(op_str);
-        memcpy(subop_input + offset, op_str, op_str_len);
-        offset += op_str_len;
+        memcpy(subop_input + offset2, op_str, op_str_len);
+        offset2 += op_str_len;
         
         /* Append key (matches Python: str(op).encode() + self.key) */
-        memcpy(subop_input + offset, cipher->key, cipher->key_len);
-        offset += cipher->key_len;
+        memcpy(subop_input + offset2, cipher->key, cipher->key_len);
+        offset2 += cipher->key_len;
         
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-        sha256_hash(subop_input, offset, subop_hash);
+        sha256_hash(subop_input, offset2, subop_hash);
         
         /* Initialize permutation array */
         for (int i = 0; i < cipher->block_size; i++) {
