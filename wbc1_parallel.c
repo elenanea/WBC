@@ -361,10 +361,26 @@ static void init_operations(WBC1Cipher *cipher, const uint8_t *key, int key_len)
     memcpy(cipher->base_operations, temp_ops, sizeof(Operation) * all_ops_count);
     cipher->base_ops_count = all_ops_count;
     
+    /* FIX #3: Generate 127 unique operation chains with uniqueness check
+     * Python (line 156-163): Retries up to 1000 times to ensure unique chains
+     * Uses set() to track seen chains and only accepts if chain_serialized not in seen
+     */
+    
+    /* Simple hash table for tracking seen chains (using string hashing) */
+    #define MAX_SEEN 256
+    typedef struct {
+        char chain_str[512];
+        int in_use;
+    } SeenChain;
+    SeenChain *seen_chains = (SeenChain *)calloc(MAX_SEEN, sizeof(SeenChain));
+    int seen_count = 0;
+    
     /* Generate 127 final operations with pre-generated chains */
     for (int i = 0; i < NUM_OPERATIONS; i++) {
         int attempt = 0;
-        while (attempt < 1000) {
+        int chain_found = 0;
+        
+        while (attempt < 1000 && !chain_found) {
             uint8_t seed_input[256];
             memcpy(seed_input, key, key_len);
             memcpy(seed_input + key_len, "WBC1_OP", 7);
@@ -389,21 +405,65 @@ static void init_operations(WBC1Cipher *cipher, const uint8_t *key, int key_len)
                 chain[j] = mt_random_init(&rng) % all_ops_count;
             }
             
-            /* Use first valid chain (no uniqueness check for simplicity) */
+            /* Serialize chain to string for uniqueness check (matching Python) */
+            char chain_serialized[512];
+            int offset = sprintf(chain_serialized, "(");
+            for (int j = 0; j < chain_len; j++) {
+                if (j > 0) offset += sprintf(chain_serialized + offset, ", ");
+                offset += sprintf(chain_serialized + offset, "('%s', '%s', '%s', '%s')",
+                    temp_ops[chain[j]].type, temp_ops[chain[j]].param1,
+                    temp_ops[chain[j]].param2, temp_ops[chain[j]].desc);
+            }
+            sprintf(chain_serialized + offset, ")");
+            
+            /* Check if chain is unique (not in seen set) */
+            int is_duplicate = 0;
+            for (int s = 0; s < seen_count && s < MAX_SEEN; s++) {
+                if (seen_chains[s].in_use && strcmp(seen_chains[s].chain_str, chain_serialized) == 0) {
+                    is_duplicate = 1;
+                    break;
+                }
+            }
+            
+            if (!is_duplicate && seen_count < MAX_SEEN) {
+                /* Chain is unique - add to seen set and use it */
+                strncpy(seen_chains[seen_count].chain_str, chain_serialized, sizeof(seen_chains[seen_count].chain_str) - 1);
+                seen_chains[seen_count].in_use = 1;
+                seen_count++;
+                
+                snprintf(cipher->operations[i].type, sizeof(cipher->operations[i].type), "dynamic");
+                snprintf(cipher->operations[i].param1, sizeof(cipher->operations[i].param1), "%d", i);
+                snprintf(cipher->operations[i].param2, sizeof(cipher->operations[i].param2), "chain");
+                snprintf(cipher->operations[i].desc, sizeof(cipher->operations[i].desc), "Dynamic ASCII op %d", i + 1);
+                snprintf(cipher->operations[i].str_repr, sizeof(cipher->operations[i].str_repr),
+                        "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", i, i + 1);
+                
+                cipher->operations[i].chain_length = chain_len;
+                for (int j = 0; j < chain_len; j++) {
+                    cipher->operations[i].chain[j] = chain[j];
+                }
+                chain_found = 1;
+            } else {
+                /* Duplicate found or seen table full - retry */
+                attempt++;
+            }
+        }
+        
+        /* Safety fallback after 1000 attempts (matching Python line 160-162) */
+        if (!chain_found) {
+            int fallback_idx = i % all_ops_count;
             snprintf(cipher->operations[i].type, sizeof(cipher->operations[i].type), "dynamic");
             snprintf(cipher->operations[i].param1, sizeof(cipher->operations[i].param1), "%d", i);
             snprintf(cipher->operations[i].param2, sizeof(cipher->operations[i].param2), "chain");
             snprintf(cipher->operations[i].desc, sizeof(cipher->operations[i].desc), "Dynamic ASCII op %d", i + 1);
             snprintf(cipher->operations[i].str_repr, sizeof(cipher->operations[i].str_repr),
                     "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", i, i + 1);
-            
-            cipher->operations[i].chain_length = chain_len;
-            for (int j = 0; j < chain_len; j++) {
-                cipher->operations[i].chain[j] = chain[j];
-            }
-            break;
+            cipher->operations[i].chain_length = 1;
+            cipher->operations[i].chain[0] = fallback_idx;
         }
     }
+    
+    free(seen_chains);
 }
 
 /* FIX #1: Individualize operations by sorting by hash (matching Python line 249-262)
