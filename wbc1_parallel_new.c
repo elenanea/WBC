@@ -844,11 +844,10 @@ static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round
     
     if (!inverse) {
         /* Layer 1: XOR with neighbors (horizontal face rotation) */
-        uint8_t first = block[0];
         for (int i = 0; i < size - 1; i++) {
             block[i] ^= block[i + 1] ^ round_key[i % 32];
         }
-        block[size - 1] ^= first ^ round_key[(size - 1) % 32];
+        block[size - 1] ^= block[0] ^ round_key[(size - 1) % 32];
         
         /* Layer 2: XOR with distance-2 neighbors (diagonal twist) */
         if (size >= 4) {
@@ -865,11 +864,10 @@ static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round
         }
         
         /* Inverse Layer 1 - properly reverse the forward operation */
-        uint8_t saved_last = block[size - 1];
         block[size - 1] ^= block[0] ^ round_key[(size - 1) % 32];
         
         for (int i = size - 2; i >= 0; i--) {
-            block[i] ^= (i == size - 2 ? saved_last : block[i + 1]) ^ round_key[i % 32];
+            block[i] ^= block[i + 1] ^ round_key[i % 32];
         }
     }
 }
