@@ -568,114 +568,57 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
         
         Operation *subop = &g_base_operations[subop_idx];
         
-        /* If sub-operation is dynamic (has its own chain), recursively apply it */
-        if (subop->chain_length > 0) {
-            /* Apply sub-operation's chain recursively */
-            int sub_start = inverse ? (subop->chain_length - 1) : 0;
-            int sub_end = inverse ? -1 : subop->chain_length;
-            int sub_step = inverse ? -1 : 1;
-            
-            for (int sub_idx = sub_start; sub_idx != sub_end; sub_idx += sub_step) {
-                int nested_subop_idx = subop->chain[sub_idx];
-                if (nested_subop_idx < 0 || nested_subop_idx >= g_base_ops_count) continue;
-                
-                Operation *nested_subop = &g_base_operations[nested_subop_idx];
-                
-                /* Generate permutation from nested sub-operation's string representation + key */
-                uint8_t subop_input[512];
-                int op_str_len = strlen(nested_subop->str_repr);
-                memcpy(subop_input, nested_subop->str_repr, op_str_len);
-                memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-                
-                uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-                sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-                
-                /* Initialize permutation */
-                for (int i = 0; i < cipher->block_size; i++) {
-                    perm[i] = i;
-                }
-                
-                /* Use MT19937 to match numpy.random.RandomState */
-                uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                               ((uint32_t)subop_hash[1] << 16) |
-                               ((uint32_t)subop_hash[2] << 8) | 
-                               ((uint32_t)subop_hash[3]);
-                
-                MT19937State mt_state;
-                mt_init(&mt_state, seed);
-                
-                /* Fisher-Yates shuffle */
-                for (int i = cipher->block_size - 1; i > 0; i--) {
-                    uint32_t rand_val = mt_random(&mt_state);
-                    int j = rand_val % (i + 1);
-                    int tmp = perm[i];
-                    perm[i] = perm[j];
-                    perm[j] = tmp;
-                }
-                
-                /* Apply permutation */
-                if (inverse) {
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        inv_perm[perm[i]] = i;
-                    }
-                    memcpy(temp, block, (size_t)cipher->block_size);
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[inv_perm[i]];
-                    }
-                } else {
-                    memcpy(temp, block, (size_t)cipher->block_size);
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[perm[i]];
-                    }
-                }
+        /* FIX #4: Linear chain iteration matching Python - NO RECURSION
+         * Python (line 313-316): for subop in chain: block = _apply_single_operation(block, subop, inverse)
+         * Each sub-operation applies ONE permutation, regardless of whether it has a chain or not.
+         * DO NOT recurse into sub-operation chains - treat all as single permutation application.
+         */
+        
+        /* Generate permutation from sub-operation's string representation + key */
+        uint8_t subop_input[512];
+        int op_str_len = strlen(subop->str_repr);
+        memcpy(subop_input, subop->str_repr, op_str_len);
+        memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
+        
+        uint8_t subop_hash[SHA256_DIGEST_LENGTH];
+        sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
+        
+        /* Initialize permutation */
+        for (int i = 0; i < cipher->block_size; i++) {
+            perm[i] = i;
+        }
+        
+        /* Use MT19937 to match numpy.random.RandomState */
+        uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
+                       ((uint32_t)subop_hash[1] << 16) |
+                       ((uint32_t)subop_hash[2] << 8) | 
+                       ((uint32_t)subop_hash[3]);
+        
+        MT19937State mt_state;
+        mt_init(&mt_state, seed);
+        
+        /* Fisher-Yates shuffle */
+        for (int i = cipher->block_size - 1; i > 0; i--) {
+            uint32_t rand_val = mt_random(&mt_state);
+            int j = rand_val % (i + 1);
+            int tmp = perm[i];
+            perm[i] = perm[j];
+            perm[j] = tmp;
+        }
+        
+        /* Apply permutation */
+        if (inverse) {
+            for (int i = 0; i < cipher->block_size; i++) {
+                inv_perm[perm[i]] = i;
+            }
+            memcpy(temp, block, (size_t)cipher->block_size);
+            for (int i = 0; i < cipher->block_size; i++) {
+                block[i] = temp[inv_perm[i]];
             }
         } else {
-            /* Base operation - generate permutation from string representation + key */
-            uint8_t subop_input[512];
-            int op_str_len = strlen(subop->str_repr);
-            memcpy(subop_input, subop->str_repr, op_str_len);
-            memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-            
-            uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-            sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-            
-            /* Initialize permutation */
+            memcpy(temp, block, (size_t)cipher->block_size);
             for (int i = 0; i < cipher->block_size; i++) {
-                perm[i] = i;
-            }
-            
-            /* Use MT19937 to match numpy.random.RandomState */
-            uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                           ((uint32_t)subop_hash[1] << 16) |
-                           ((uint32_t)subop_hash[2] << 8) | 
-                           ((uint32_t)subop_hash[3]);
-            
-            MT19937State mt_state;
-            mt_init(&mt_state, seed);
-            
-            /* Fisher-Yates shuffle */
-            for (int i = cipher->block_size - 1; i > 0; i--) {
-                uint32_t rand_val = mt_random(&mt_state);
-                int j = rand_val % (i + 1);
-                int tmp = perm[i];
-                perm[i] = perm[j];
-                perm[j] = tmp;
-            }
-            
-            /* Apply permutation */
-            if (inverse) {
-                for (int i = 0; i < cipher->block_size; i++) {
-                    inv_perm[perm[i]] = i;
-                }
-                memcpy(temp, block, (size_t)cipher->block_size);
-                for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[inv_perm[i]];
-                }
-            } else {
-                memcpy(temp, block, (size_t)cipher->block_size);
-                for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[perm[i]];
-                }
+                block[i] = temp[perm[i]];
             }
         }
     }
