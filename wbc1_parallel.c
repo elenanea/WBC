@@ -49,11 +49,11 @@ typedef struct {
     int chain[8];       /* Pre-generated chain of sub-operation indices (3-6 for dynamic ops) */
 } Operation;
 
-/* Global operations array - will be initialized once */
-static Operation g_operations[NUM_OPERATIONS];
-static int g_operations_initialized = 0;
-static Operation g_base_operations[300];  /* Storage for base and dynamic_20 operations */
-static int g_base_ops_count = 0;  /* Count of base operations (87 + 20 = 107) */
+/* FIX #2: Removed global operations - now per-instance in WBC1Cipher struct
+ * This matches Python where operations are generated per cipher instance (line 200-201)
+ * Previously: Global arrays shared across all cipher instances → wrong operations for different keys
+ * Now: Each cipher instance has its own operations → correct behavior with multiple keys
+ */
 
 /* WBC1 Cipher structure */
 typedef struct {
@@ -67,6 +67,10 @@ typedef struct {
     int block_size;
     int num_rounds;
     int algorithm_mode;
+    /* FIX #2: Per-instance operations (matching Python line 200-201) */
+    Operation *operations;           /* 127 final operations */
+    Operation *base_operations;      /* 107 base operations (87 base + 20 dynamic_20) */
+    int base_ops_count;              /* Count of base operations */
 } WBC1Cipher;
 
 /* Helper function prototypes */
@@ -218,8 +222,14 @@ static uint32_t mt_random_init(MT19937InitState *state) {
 }
 
 /* Initialize operations array matching Python's build_127_ascii_operations */
-static void init_operations(const uint8_t *key, int key_len) {
-    if (g_operations_initialized) return;
+static void init_operations(WBC1Cipher *cipher, const uint8_t *key, int key_len) {
+    /* FIX #2: Per-instance operations - allocate memory for this cipher instance */
+    cipher->operations = (Operation *)malloc(NUM_OPERATIONS * sizeof(Operation));
+    cipher->base_operations = (Operation *)malloc(300 * sizeof(Operation));
+    if (!cipher->operations || !cipher->base_operations) {
+        fprintf(stderr, "Error: Memory allocation failed for operations\n");
+        return;
+    }
     
     /* Temporary array to hold base operations before generating final 127 */
     Operation temp_ops[300];
@@ -347,9 +357,9 @@ static void init_operations(const uint8_t *key, int key_len) {
     
     int all_ops_count = temp_idx;  /* Should be 107 (87 + 20) */
     
-    /* Store temp_ops in global for use by apply_operation */
-    memcpy(g_base_operations, temp_ops, sizeof(Operation) * all_ops_count);
-    g_base_ops_count = all_ops_count;
+    /* Store temp_ops in cipher->base_operations for use by apply_operation */
+    memcpy(cipher->base_operations, temp_ops, sizeof(Operation) * all_ops_count);
+    cipher->base_ops_count = all_ops_count;
     
     /* Generate 127 final operations with pre-generated chains */
     for (int i = 0; i < NUM_OPERATIONS; i++) {
@@ -380,22 +390,20 @@ static void init_operations(const uint8_t *key, int key_len) {
             }
             
             /* Use first valid chain (no uniqueness check for simplicity) */
-            snprintf(g_operations[i].type, sizeof(g_operations[i].type), "dynamic");
-            snprintf(g_operations[i].param1, sizeof(g_operations[i].param1), "%d", i);
-            snprintf(g_operations[i].param2, sizeof(g_operations[i].param2), "chain");
-            snprintf(g_operations[i].desc, sizeof(g_operations[i].desc), "Dynamic ASCII op %d", i + 1);
-            snprintf(g_operations[i].str_repr, sizeof(g_operations[i].str_repr),
+            snprintf(cipher->operations[i].type, sizeof(cipher->operations[i].type), "dynamic");
+            snprintf(cipher->operations[i].param1, sizeof(cipher->operations[i].param1), "%d", i);
+            snprintf(cipher->operations[i].param2, sizeof(cipher->operations[i].param2), "chain");
+            snprintf(cipher->operations[i].desc, sizeof(cipher->operations[i].desc), "Dynamic ASCII op %d", i + 1);
+            snprintf(cipher->operations[i].str_repr, sizeof(cipher->operations[i].str_repr),
                     "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", i, i + 1);
             
-            g_operations[i].chain_length = chain_len;
+            cipher->operations[i].chain_length = chain_len;
             for (int j = 0; j < chain_len; j++) {
-                g_operations[i].chain[j] = chain[j];
+                cipher->operations[i].chain[j] = chain[j];
             }
             break;
         }
     }
-    
-    g_operations_initialized = 1;
 }
 
 /* FIX #1: Individualize operations by sorting by hash (matching Python line 249-262)
@@ -437,13 +445,13 @@ static int compare_operations_by_hash(const void *a, const void *b) {
 }
 
 /* Sort operations by hash for key-dependent ordering (matching Python's _individualize_operations) */
-static void individualize_operations(const uint8_t *key, int key_len) {
+static void individualize_operations(WBC1Cipher *cipher, const uint8_t *key, int key_len) {
     /* Set global key for comparison function */
     g_sort_key = key;
     g_sort_key_len = key_len;
     
-    /* Sort g_operations array by hash(str_repr + key) */
-    qsort(g_operations, NUM_OPERATIONS, sizeof(Operation), compare_operations_by_hash);
+    /* Sort cipher->operations array by hash(str_repr + key) */
+    qsort(cipher->operations, NUM_OPERATIONS, sizeof(Operation), compare_operations_by_hash);
     
     /* Clear global key */
     g_sort_key = NULL;
@@ -599,7 +607,7 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
     }
     
     /* Get the operation (all 127 operations have pre-generated chains) */
-    Operation *op = &g_operations[op_id];
+    Operation *op = &cipher->operations[op_id];
     int chain_length = op->chain_length;
     
     /* Apply chain of permutations using PRE-GENERATED chain indices
@@ -613,12 +621,12 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
         int subop_idx = op->chain[chain_idx];
         
         /* Safety check */
-        if (subop_idx < 0 || subop_idx >= g_base_ops_count) {
+        if (subop_idx < 0 || subop_idx >= cipher->base_ops_count) {
             fprintf(stderr, "Error: Invalid sub-op index %d in chain\n", subop_idx);
             continue;
         }
         
-        Operation *subop = &g_base_operations[subop_idx];
+        Operation *subop = &cipher->base_operations[subop_idx];
         
         /* FIX #4: Linear chain iteration matching Python - NO RECURSION
          * Python (line 313-316): for subop in chain: block = _apply_single_operation(block, subop, inverse)
@@ -716,11 +724,11 @@ static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direc
 /* ===== Cipher Operations ===== */
 
 void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_rounds, int algorithm_mode) {
-    /* Initialize operations array (once) with metadata matching Python */
-    init_operations(key, key_len);
+    /* FIX #2: Initialize operations array per-instance (matching Python line 200-201) */
+    init_operations(cipher, key, key_len);
     
     /* FIX #1: Sort operations by hash for key-dependent ordering (matching Python line 201) */
-    individualize_operations(key, key_len);
+    individualize_operations(cipher, key, key_len);
     
     cipher->key = malloc(key_len);
     memcpy(cipher->key, key, key_len);
@@ -737,6 +745,16 @@ void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_roun
 }
 
 void wbc1_free(WBC1Cipher *cipher) {
+    /* FIX #2: Free per-instance operations */
+    if (cipher->operations) {
+        free(cipher->operations);
+        cipher->operations = NULL;
+    }
+    if (cipher->base_operations) {
+        free(cipher->base_operations);
+        cipher->base_operations = NULL;
+    }
+    
     if (cipher->key) {
         free(cipher->key);
         cipher->key = NULL;
