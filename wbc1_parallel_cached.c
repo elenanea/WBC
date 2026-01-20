@@ -1469,7 +1469,7 @@ int main(int argc, char **argv) {
             printf("   ────────────────────────────────────\n");
             printf("   Testing: 1-bit key change → output bit changes\n");
             
-            int total_flips = 0;
+            long long total_flips = 0;
             int total_bits = ciphertext_len * 8;
             
             // Test all 256 bits of the key (32 bytes * 8 bits)
@@ -1507,7 +1507,9 @@ int main(int argc, char **argv) {
                 wbc1_free(&modified_cipher);
             }
             
-            double diff_effect = (double)total_flips / (256.0 * total_bits);
+            // Match Python formula: flips / (256 * total_bits)
+            // This represents: bits_changed / (number_of_key_bits * output_bits)
+            double diff_effect = (double)total_flips / (256.0 * (double)total_bits);
             printf("   Mean:        %.2f%%", diff_effect * 100.0);
             if (diff_effect * 100.0 >= 45.0 && diff_effect * 100.0 <= 55.0) {
                 printf("  ✓ EXCELLENT (45-55%% expected)\n");

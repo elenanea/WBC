@@ -1555,7 +1555,7 @@ int main(int argc, char **argv) {
             printf("   Тестирование чувствительности к изменению ключа...\n");
             printf("   Testing key sensitivity to single bit flips...\n");
             
-            int total_flips = 0;
+            long long total_flips = 0;
             int total_bits = ciphertext_len * 8;
             
             // Test all 256 bits of the key (32 bytes * 8 bits)
@@ -1593,7 +1593,9 @@ int main(int argc, char **argv) {
                 wbc1_free(&modified_cipher);
             }
             
-            double diff_effect = (double)total_flips / (256.0 * total_bits);
+            // Match Python formula: flips / (256 * total_bits)
+            // This represents: bits_changed / (number_of_key_bits * output_bits)
+            double diff_effect = (double)total_flips / (256.0 * (double)total_bits);
             printf("   Изменение выходных битов / Output bit changes: %.2f%%\n", diff_effect * 100.0);
             printf("   (Идеально / Ideal: ~50%% изменений при 1-битном изменении ключа)\n");
             
