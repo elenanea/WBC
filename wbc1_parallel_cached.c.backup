@@ -235,181 +235,104 @@ static uint32_t mt_random_init(MT19937InitState *state) {
 }
 
 /* Initialize operations array matching Python's build_127_ascii_operations */
-static void init_operations(const uint8_t *key, int key_len) {
+static void init_operations(const uint8_t *key __attribute__((unused)), 
+                            int key_len __attribute__((unused))) {
     if (g_operations_initialized) return;
     
-    /* Temporary array to hold base operations before generating final 127 */
-    Operation temp_ops[300];
-    int temp_idx = 0;
+    int op_idx = 0;
     
     /* Face rotations: 6 faces x 4 directions = 24 ops */
     const char *faces[] = {"U", "D", "L", "R", "F", "B"};
     const char *dirs[] = {"", "'", "2", "3"};
-    for (int f = 0; f < 6; f++) {
-        for (int d = 0; d < 4; d++) {
-            snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "face");
-            snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%s", faces[f]);
-            snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "%s", dirs[d]);
-            snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Rotate %s face %s", faces[f], dirs[d]);
-            snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int f = 0; f < 6 && op_idx < NUM_OPERATIONS; f++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "face");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", faces[f]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Rotate %s face %s", faces[f], dirs[d]);
+            /* Create Python-like string representation */
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                     "('face', '%s', '%s', 'Rotate %s face %s')", faces[f], dirs[d], faces[f], dirs[d]);
-            temp_ops[temp_idx].chain_length = 0;
-            temp_idx++;
+            op_idx++;
         }
     }
     
     /* Slice moves: 3 slices x 4 directions = 12 ops */
     const char *slices[] = {"M", "E", "S"};
-    for (int s = 0; s < 3; s++) {
-        for (int d = 0; d < 4; d++) {
-            snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "slice");
-            snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%s", slices[s]);
-            snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "%s", dirs[d]);
-            snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Rotate %s slice %s", slices[s], dirs[d]);
-            snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int s = 0; s < 3 && op_idx < NUM_OPERATIONS; s++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "slice");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", slices[s]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Rotate %s slice %s", slices[s], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                     "('slice', '%s', '%s', 'Rotate %s slice %s')", slices[s], dirs[d], slices[s], dirs[d]);
-            temp_ops[temp_idx].chain_length = 0;
-            temp_idx++;
+            op_idx++;
         }
     }
     
     /* Wide moves: 6 moves x 4 directions = 24 ops */
     const char *wide_moves[] = {"u", "d", "l", "r", "f", "b"};
-    for (int w = 0; w < 6; w++) {
-        for (int d = 0; d < 4; d++) {
-            snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "wide");
-            snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%s", wide_moves[w]);
-            snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "%s", dirs[d]);
-            snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Wide move %s%s", wide_moves[w], dirs[d]);
-            snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int w = 0; w < 6 && op_idx < NUM_OPERATIONS; w++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "wide");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", wide_moves[w]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Wide move %s%s", wide_moves[w], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                     "('wide', '%s', '%s', 'Wide move %s%s')", wide_moves[w], dirs[d], wide_moves[w], dirs[d]);
-            temp_ops[temp_idx].chain_length = 0;
-            temp_idx++;
+            op_idx++;
         }
     }
     
     /* Cube rotations: 3 axes x 4 directions = 12 ops */
     const char *cube_rot[] = {"x", "y", "z"};
-    for (int r = 0; r < 3; r++) {
-        for (int d = 0; d < 4; d++) {
-            snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "cube");
-            snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%s", cube_rot[r]);
-            snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "%s", dirs[d]);
-            snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Cube rotation %s%s", cube_rot[r], dirs[d]);
-            snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int r = 0; r < 3 && op_idx < NUM_OPERATIONS; r++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "cube");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", cube_rot[r]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Cube rotation %s%s", cube_rot[r], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                     "('cube', '%s', '%s', 'Cube rotation %s%s')", cube_rot[r], dirs[d], cube_rot[r], dirs[d]);
-            temp_ops[temp_idx].chain_length = 0;
-            temp_idx++;
+            op_idx++;
         }
     }
     
     /* Swap operations: 3 axes x 4 offsets = 12 ops */
-    for (int axis = 0; axis < 3; axis++) {
-        for (int k = 0; k < 4; k++) {
-            snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "swap");
-            snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%d", axis);
-            snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "%d", k);
-            snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Swap axis=%d, offset=%d", axis, k);
-            snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
+        for (int k = 0; k < 4 && op_idx < NUM_OPERATIONS; k++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "swap");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%d", k);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Swap axis=%d, offset=%d", axis, k);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                     "('swap', %d, %d, 'Swap axis=%d, offset=%d')", axis, k, axis, k);
-            temp_ops[temp_idx].chain_length = 0;
-            temp_idx++;
+            op_idx++;
         }
     }
     
     /* Diagonal flip operations: 3 axes = 3 ops */
-    for (int axis = 0; axis < 3; axis++) {
-        snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "diagflip");
-        snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%d", axis);
-        temp_ops[temp_idx].param2[0] = '\0';
-        snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Diagonal flip axis=%d", axis);
-        snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
+    for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
+        snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "diagflip");
+        snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
+        g_operations[op_idx].param2[0] = '\0';  /* Empty string */
+        snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Diagonal flip axis=%d", axis);
+        snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
                 "('diagflip', %d, '', 'Diagonal flip axis=%d')", axis, axis);
-        temp_ops[temp_idx].chain_length = 0;
-        temp_idx++;
+        op_idx++;
     }
     
-    int static_ops_count = temp_idx;  /* Should be 87 base operations */
-    
-    /* Generate 20 dynamic operations with 4-7 base operations */
-    for (int i = 0; i < 20; i++) {
-        uint8_t seed_input[256];
-        memcpy(seed_input, key, key_len);
-        seed_input[key_len] = i & 0xFF;
-        seed_input[key_len + 1] = (i >> 8) & 0xFF;
-        
-        uint8_t hash[SHA256_DIGEST_LENGTH];
-        sha256_hash(seed_input, key_len + 2, hash);
-        uint32_t seed = ((uint32_t)hash[0] << 24) | ((uint32_t)hash[1] << 16) | 
-                       ((uint32_t)hash[2] << 8) | ((uint32_t)hash[3]);
-        
-        MT19937InitState rng;
-        mt_init_seed(&rng, seed);
-        
-        int n_ops = 4 + (mt_random_init(&rng) % 4);  /* 4-7 operations */
-        
-        snprintf(temp_ops[temp_idx].type, sizeof(temp_ops[temp_idx].type), "dynamic");
-        snprintf(temp_ops[temp_idx].param1, sizeof(temp_ops[temp_idx].param1), "%d", i);
-        snprintf(temp_ops[temp_idx].param2, sizeof(temp_ops[temp_idx].param2), "ops");
-        snprintf(temp_ops[temp_idx].desc, sizeof(temp_ops[temp_idx].desc), "Dynamic pattern %d", i);
-        snprintf(temp_ops[temp_idx].str_repr, sizeof(temp_ops[temp_idx].str_repr),
-                "('dynamic', %d, 'ops', 'Dynamic pattern %d')", i, i);
-        
-        temp_ops[temp_idx].chain_length = n_ops;
-        for (int j = 0; j < n_ops; j++) {
-            temp_ops[temp_idx].chain[j] = mt_random_init(&rng) % static_ops_count;
-        }
-        temp_idx++;
-    }
-    
-    int all_ops_count = temp_idx;  /* Should be 107 (87 + 20) */
-    
-    /* Store temp_ops in global for use by apply_operation */
-    memcpy(g_base_operations, temp_ops, sizeof(Operation) * all_ops_count);
-    g_base_ops_count = all_ops_count;
-    
-    /* Generate 127 final operations with pre-generated chains */
-    for (int i = 0; i < NUM_OPERATIONS; i++) {
-        int attempt = 0;
-        while (attempt < 1000) {
-            uint8_t seed_input[256];
-            memcpy(seed_input, key, key_len);
-            memcpy(seed_input + key_len, "WBC1_OP", 7);
-            seed_input[key_len + 7] = i & 0xFF;
-            seed_input[key_len + 8] = (i >> 8) & 0xFF;
-            seed_input[key_len + 9] = attempt & 0xFF;
-            seed_input[key_len + 10] = (attempt >> 8) & 0xFF;
-            
-            uint8_t hash[SHA256_DIGEST_LENGTH];
-            sha256_hash(seed_input, key_len + 11, hash);
-            uint32_t seed = ((uint32_t)hash[0] << 24) | ((uint32_t)hash[1] << 16) | 
-                           ((uint32_t)hash[2] << 8) | ((uint32_t)hash[3]);
-            
-            MT19937InitState rng;
-            mt_init_seed(&rng, seed);
-            
-            int chain_len = 3 + (mt_random_init(&rng) % 4);  /* 3-6 operations */
-            
-            /* Generate chain */
-            int chain[8];
-            for (int j = 0; j < chain_len; j++) {
-                chain[j] = mt_random_init(&rng) % all_ops_count;
-            }
-            
-            /* Use first valid chain (no uniqueness check for simplicity) */
-            snprintf(g_operations[i].type, sizeof(g_operations[i].type), "dynamic");
-            snprintf(g_operations[i].param1, sizeof(g_operations[i].param1), "%d", i);
-            snprintf(g_operations[i].param2, sizeof(g_operations[i].param2), "chain");
-            snprintf(g_operations[i].desc, sizeof(g_operations[i].desc), "Dynamic ASCII op %d", i + 1);
-            snprintf(g_operations[i].str_repr, sizeof(g_operations[i].str_repr),
-                    "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", i, i + 1);
-            
-            g_operations[i].chain_length = chain_len;
-            for (int j = 0; j < chain_len; j++) {
-                g_operations[i].chain[j] = chain[j];
-            }
-            break;
-        }
+    /* Fill remaining slots with dynamic operations */
+    while (op_idx < NUM_OPERATIONS) {
+        int dyn_id = op_idx - 87;  /* Dynamic operations start at index 87 */
+        snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "dynamic");
+        snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", dyn_id);
+        snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "chain");
+        snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Dynamic ASCII op %d", dyn_id + 1);
+        snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", dyn_id, dyn_id + 1);
+        op_idx++;
     }
     
     g_operations_initialized = 1;
@@ -564,10 +487,7 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
  * Apply dynamic Rubik's cube permutation operation using CACHED permutation
  * This eliminates SHA-256 computation and permutation generation per block
  */
-/* Apply dynamic Rubik's cube permutation operation using pre-generated chains */
 static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
-    int perm[BLOCK_SIZE];
-    int inv_perm[BLOCK_SIZE];
     uint8_t temp[BLOCK_SIZE];
     
     /* Safety check */
@@ -576,133 +496,122 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
         return;
     }
     
-    /* Get the operation (all 127 operations have pre-generated chains) */
-    Operation *op = &g_operations[op_id];
-    int chain_length = op->chain_length;
+    /* CRITICAL FIX: Apply a CHAIN of permutations to match Python implementation
+     * Python applies 3-6 sub-permutations per operation for good diffusion
+     * This is essential for Mode 0's cryptographic strength */
     
-    /* Apply chain of permutations using PRE-GENERATED chain indices
-     * CRITICAL: For decryption (inverse=1), apply chain in REVERSE order */
+    /* Determine chain length (3-6 permutations) based on op_id */
+    uint8_t chain_input[256];
+    memcpy(chain_input, cipher->key, cipher->key_len);
+    memcpy(chain_input + cipher->key_len, "CHAIN_LEN", 9);
+    chain_input[cipher->key_len + 9] = (op_id >> 8) & 0xFF;
+    chain_input[cipher->key_len + 10] = op_id & 0xFF;
+    
+    uint8_t chain_hash[SHA256_DIGEST_LENGTH];
+    sha256_hash(chain_input, cipher->key_len + 11, chain_hash);
+    int chain_length = 3 + (chain_hash[0] % 4);  /* 3-6 permutations */
+    
+    /* Apply chain of permutations
+     * CRITICAL: For decryption (inverse=1), apply chain in REVERSE order
+     * to properly undo the permutations applied during encryption */
     int start_idx = inverse ? (chain_length - 1) : 0;
     int end_idx = inverse ? -1 : chain_length;
     int step = inverse ? -1 : 1;
     
     for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
-        /* Get the sub-operation from the pre-generated chain */
-        int subop_idx = op->chain[chain_idx];
+        /* CRITICAL FIX: Generate COMPLETELY INDEPENDENT operation ID for each chain position
+         * Python implementation: each subop in chain is picked from a list of pre-generated 
+         * operations, so each has a COMPLETELY DIFFERENT operation tuple.
+         * 
+         * Solution: Hash (key + op_id + chain_idx) to get a sub_op_id, then use that
+         * sub_op_id (NOT op_id) to generate the permutation. This ensures each position
+         * in the chain references a completely different "operation" */
         
-        /* Safety check */
-        if (subop_idx < 0 || subop_idx >= g_base_ops_count) {
-            fprintf(stderr, "Error: Invalid sub-op index %d in chain\n", subop_idx);
-            continue;
+        uint8_t subop_seed_input[256];
+        int offset = 0;
+        
+        memcpy(subop_seed_input + offset, cipher->key, cipher->key_len);
+        offset += cipher->key_len;
+        memcpy(subop_seed_input + offset, "WBC1_SUBOP", 10);
+        offset += 10;
+        subop_seed_input[offset++] = (op_id >> 8) & 0xFF;
+        subop_seed_input[offset++] = op_id & 0xFF;
+        subop_seed_input[offset++] = (chain_idx >> 8) & 0xFF;
+        subop_seed_input[offset++] = chain_idx & 0xFF;
+        
+        uint8_t subop_seed_hash[SHA256_DIGEST_LENGTH];
+        sha256_hash(subop_seed_input, offset, subop_seed_hash);
+        
+        /* Extract sub_op_id from hash - this is our "independent operation" reference */
+        int sub_op_id = ((int)subop_seed_hash[0] << 24) | 
+                        ((int)subop_seed_hash[1] << 16) |
+                        ((int)subop_seed_hash[2] << 8) | 
+                        ((int)subop_seed_hash[3]);
+        if (sub_op_id < 0) sub_op_id = -sub_op_id;
+        sub_op_id = sub_op_id % NUM_OPERATIONS;  /* Ensure valid index */
+        
+        /* CRITICAL FIX: Use operation's string representation (matching Python's str(op))
+         * Python: op_hash = hashlib.sha256(str(op).encode() + self.key).digest()
+         * where str(op) = "('face', 'U', '', 'Rotate U face ')" or similar
+         * 
+         * C: Use g_operations[sub_op_id].str_repr + key */
+        uint8_t subop_input[512];  /* Increased size for string representation */
+        offset = 0;
+        
+        /* Copy operation string representation (matches Python's str(op)) */
+        const char *op_str = g_operations[sub_op_id].str_repr;
+        int op_str_len = strlen(op_str);
+        memcpy(subop_input + offset, op_str, op_str_len);
+        offset += op_str_len;
+        
+        /* Append key (matches Python: str(op).encode() + self.key) */
+        memcpy(subop_input + offset, cipher->key, cipher->key_len);
+        offset += cipher->key_len;
+        
+        uint8_t subop_hash[SHA256_DIGEST_LENGTH];
+        sha256_hash(subop_input, offset, subop_hash);
+        
+        /* Initialize permutation array */
+        int perm[BLOCK_SIZE];
+        int inv_perm[BLOCK_SIZE];
+        for (int i = 0; i < cipher->block_size; i++) {
+            perm[i] = i;
         }
         
-        Operation *subop = &g_base_operations[subop_idx];
+        /* CRITICAL FIX: Use Mersenne Twister MT19937 to match numpy.random.RandomState */
+        /* Extract 32-bit seed from hash (same as Python: int.from_bytes(op_hash[:4], 'big')) */
+        uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
+                        ((uint32_t)subop_hash[1] << 16) |
+                        ((uint32_t)subop_hash[2] << 8) | 
+                        ((uint32_t)subop_hash[3]);
         
-        /* If sub-operation is dynamic (has its own chain), recursively apply it */
-        if (subop->chain_length > 0) {
-            /* Apply sub-operation's chain recursively */
-            int sub_start = inverse ? (subop->chain_length - 1) : 0;
-            int sub_end = inverse ? -1 : subop->chain_length;
-            int sub_step = inverse ? -1 : 1;
+        MT19937State mt_state;
+        mt_init(&mt_state, seed);
+        
+        /* Fisher-Yates shuffle using Mersenne Twister (matching numpy.random.shuffle) */
+        for (int i = cipher->block_size - 1; i > 0; i--) {
+            uint32_t rand_val = mt_random(&mt_state);
+            int j = rand_val % (i + 1);
+            int temp_swap = perm[i];
+            perm[i] = perm[j];
+            perm[j] = temp_swap;
+        }
+        
+        if (cipher->block_size > 0) {
+            memcpy(temp, block, (size_t)cipher->block_size);
             
-            for (int sub_idx = sub_start; sub_idx != sub_end; sub_idx += sub_step) {
-                int nested_subop_idx = subop->chain[sub_idx];
-                if (nested_subop_idx < 0 || nested_subop_idx >= g_base_ops_count) continue;
-                
-                Operation *nested_subop = &g_base_operations[nested_subop_idx];
-                
-                /* Generate permutation from nested sub-operation's string representation + key */
-                uint8_t subop_input[512];
-                int op_str_len = strlen(nested_subop->str_repr);
-                memcpy(subop_input, nested_subop->str_repr, op_str_len);
-                memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-                
-                uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-                sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-                
-                /* Initialize permutation */
+            if (inverse) {
+                /* Compute and apply inverse permutation */
                 for (int i = 0; i < cipher->block_size; i++) {
-                    perm[i] = i;
-                }
-                
-                /* Use MT19937 to match numpy.random.RandomState */
-                uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                               ((uint32_t)subop_hash[1] << 16) |
-                               ((uint32_t)subop_hash[2] << 8) | 
-                               ((uint32_t)subop_hash[3]);
-                
-                MT19937State mt_state;
-                mt_init(&mt_state, seed);
-                
-                /* Fisher-Yates shuffle */
-                for (int i = cipher->block_size - 1; i > 0; i--) {
-                    uint32_t rand_val = mt_random(&mt_state);
-                    int j = rand_val % (i + 1);
-                    int tmp = perm[i];
-                    perm[i] = perm[j];
-                    perm[j] = tmp;
-                }
-                
-                /* Apply permutation */
-                if (inverse) {
-                    for (int i = 0; i < cipher->block_size; i++) {
+                    if (perm[i] >= 0 && perm[i] < cipher->block_size) {
                         inv_perm[perm[i]] = i;
                     }
-                    memcpy(temp, block, (size_t)cipher->block_size);
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[inv_perm[i]];
-                    }
-                } else {
-                    memcpy(temp, block, (size_t)cipher->block_size);
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[perm[i]];
-                    }
                 }
-            }
-        } else {
-            /* Base operation - generate permutation from string representation + key */
-            uint8_t subop_input[512];
-            int op_str_len = strlen(subop->str_repr);
-            memcpy(subop_input, subop->str_repr, op_str_len);
-            memcpy(subop_input + op_str_len, cipher->key, cipher->key_len);
-            
-            uint8_t subop_hash[SHA256_DIGEST_LENGTH];
-            sha256_hash(subop_input, op_str_len + cipher->key_len, subop_hash);
-            
-            /* Initialize permutation */
-            for (int i = 0; i < cipher->block_size; i++) {
-                perm[i] = i;
-            }
-            
-            /* Use MT19937 to match numpy.random.RandomState */
-            uint32_t seed = ((uint32_t)subop_hash[0] << 24) | 
-                           ((uint32_t)subop_hash[1] << 16) |
-                           ((uint32_t)subop_hash[2] << 8) | 
-                           ((uint32_t)subop_hash[3]);
-            
-            MT19937State mt_state;
-            mt_init(&mt_state, seed);
-            
-            /* Fisher-Yates shuffle */
-            for (int i = cipher->block_size - 1; i > 0; i--) {
-                uint32_t rand_val = mt_random(&mt_state);
-                int j = rand_val % (i + 1);
-                int tmp = perm[i];
-                perm[i] = perm[j];
-                perm[j] = tmp;
-            }
-            
-            /* Apply permutation */
-            if (inverse) {
-                for (int i = 0; i < cipher->block_size; i++) {
-                    inv_perm[perm[i]] = i;
-                }
-                memcpy(temp, block, (size_t)cipher->block_size);
                 for (int i = 0; i < cipher->block_size; i++) {
                     block[i] = temp[inv_perm[i]];
                 }
             } else {
-                memcpy(temp, block, (size_t)cipher->block_size);
+                /* Apply forward permutation */
                 for (int i = 0; i < cipher->block_size; i++) {
                     block[i] = temp[perm[i]];
                 }
@@ -711,6 +620,7 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
     }
 }
 
+/* S-box substitution */
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse) {
     for (int i = 0; i < cipher->block_size; i++) {
         block[i] = inverse ? cipher->inv_sbox[block[i]] : cipher->sbox[block[i]];
