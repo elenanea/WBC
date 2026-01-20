@@ -398,6 +398,58 @@ static void init_operations(const uint8_t *key, int key_len) {
     g_operations_initialized = 1;
 }
 
+/* FIX #1: Individualize operations by sorting by hash (matching Python line 249-262)
+ * Python: ops.sort(key=lambda op: hashlib.sha256(json.dumps([str(x) for x in op], sort_keys=True).encode() + self.key).digest())
+ * This ensures op_id values map to same operations in Python and C
+ */
+
+/* Global key for sorting comparison */
+static const uint8_t *g_sort_key = NULL;
+static int g_sort_key_len = 0;
+
+/* Comparison function for qsort that computes hash(str_repr + key) */
+static int compare_operations_by_hash(const void *a, const void *b) {
+    const Operation *op_a = (const Operation *)a;
+    const Operation *op_b = (const Operation *)b;
+    
+    /* Compute hash for operation A: hash(str_repr + key) */
+    size_t len_a = strlen(op_a->str_repr) + g_sort_key_len;
+    uint8_t *input_a = malloc(len_a);
+    memcpy(input_a, op_a->str_repr, strlen(op_a->str_repr));
+    memcpy(input_a + strlen(op_a->str_repr), g_sort_key, g_sort_key_len);
+    
+    uint8_t hash_a[SHA256_DIGEST_LENGTH];
+    sha256_hash(input_a, len_a, hash_a);
+    free(input_a);
+    
+    /* Compute hash for operation B: hash(str_repr + key) */
+    size_t len_b = strlen(op_b->str_repr) + g_sort_key_len;
+    uint8_t *input_b = malloc(len_b);
+    memcpy(input_b, op_b->str_repr, strlen(op_b->str_repr));
+    memcpy(input_b + strlen(op_b->str_repr), g_sort_key, g_sort_key_len);
+    
+    uint8_t hash_b[SHA256_DIGEST_LENGTH];
+    sha256_hash(input_b, len_b, hash_b);
+    free(input_b);
+    
+    /* Compare hashes byte by byte */
+    return memcmp(hash_a, hash_b, SHA256_DIGEST_LENGTH);
+}
+
+/* Sort operations by hash for key-dependent ordering (matching Python's _individualize_operations) */
+static void individualize_operations(const uint8_t *key, int key_len) {
+    /* Set global key for comparison function */
+    g_sort_key = key;
+    g_sort_key_len = key_len;
+    
+    /* Sort g_operations array by hash(str_repr + key) */
+    qsort(g_operations, NUM_OPERATIONS, sizeof(Operation), compare_operations_by_hash);
+    
+    /* Clear global key */
+    g_sort_key = NULL;
+    g_sort_key_len = 0;
+}
+
 /* Generate key-dependent S-box using SHA-256 */
 static void generate_sbox(WBC1Cipher *cipher) {
     uint8_t hash[SHA256_DIGEST_LENGTH];
@@ -666,6 +718,9 @@ static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direc
 void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_rounds, int algorithm_mode) {
     /* Initialize operations array (once) with metadata matching Python */
     init_operations(key, key_len);
+    
+    /* FIX #1: Sort operations by hash for key-dependent ordering (matching Python line 201) */
+    individualize_operations(key, key_len);
     
     cipher->key = malloc(key_len);
     memcpy(cipher->key, key, key_len);
