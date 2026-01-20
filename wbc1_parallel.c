@@ -32,10 +32,24 @@
 #define BLOCK_SIZE 16
 #define MAX_ROUNDS 64
 #define NUM_OPERATIONS 127
+#define MAX_OP_STRING 256
 
 /* Algorithm modes */
 #define MODE_SIMPLIFIED 0  /* 2 operations: permutation + rotation */
 #define MODE_FULL 1        /* 5 operations: permutation + XOR + S-box + diffusion + rotation */
+
+/* Operation metadata structure to match Python's tuple representation */
+typedef struct {
+    char type[32];      /* e.g., "face", "slice", "wide", "cube", "alg", "pattern", "swap", "diagflip", "dynamic" */
+    char param1[64];    /* e.g., face name, axis number */
+    char param2[64];    /* e.g., direction, offset */
+    char desc[128];     /* description */
+    char str_repr[MAX_OP_STRING];  /* Python-like str() representation: "('type', 'param1', 'param2', 'desc')" */
+} Operation;
+
+/* Global operations array - will be initialized once */
+static Operation g_operations[NUM_OPERATIONS];
+static int g_operations_initialized = 0;
 
 /* WBC1 Cipher structure */
 typedef struct {
@@ -164,6 +178,109 @@ static void sha256_hash(const uint8_t *data, size_t len, uint8_t *output) {
     }
     
     EVP_MD_CTX_free(ctx);
+}
+
+/* Initialize operations array with metadata matching Python's build_127_ascii_operations */
+static void init_operations(const uint8_t *key, int key_len) {
+    if (g_operations_initialized) return;
+    
+    int op_idx = 0;
+    
+    /* Face rotations: 6 faces x 4 directions = 24 ops */
+    const char *faces[] = {"U", "D", "L", "R", "F", "B"};
+    const char *dirs[] = {"", "'", "2", "3"};
+    for (int f = 0; f < 6 && op_idx < NUM_OPERATIONS; f++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "face");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", faces[f]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Rotate %s face %s", faces[f], dirs[d]);
+            /* Create Python-like string representation */
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                    "('face', '%s', '%s', 'Rotate %s face %s')", faces[f], dirs[d], faces[f], dirs[d]);
+            op_idx++;
+        }
+    }
+    
+    /* Slice moves: 3 slices x 4 directions = 12 ops */
+    const char *slices[] = {"M", "E", "S"};
+    for (int s = 0; s < 3 && op_idx < NUM_OPERATIONS; s++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "slice");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", slices[s]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Rotate %s slice %s", slices[s], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                    "('slice', '%s', '%s', 'Rotate %s slice %s')", slices[s], dirs[d], slices[s], dirs[d]);
+            op_idx++;
+        }
+    }
+    
+    /* Wide moves: 6 moves x 4 directions = 24 ops */
+    const char *wide_moves[] = {"u", "d", "l", "r", "f", "b"};
+    for (int w = 0; w < 6 && op_idx < NUM_OPERATIONS; w++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "wide");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", wide_moves[w]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Wide move %s%s", wide_moves[w], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                    "('wide', '%s', '%s', 'Wide move %s%s')", wide_moves[w], dirs[d], wide_moves[w], dirs[d]);
+            op_idx++;
+        }
+    }
+    
+    /* Cube rotations: 3 axes x 4 directions = 12 ops */
+    const char *cube_rot[] = {"x", "y", "z"};
+    for (int r = 0; r < 3 && op_idx < NUM_OPERATIONS; r++) {
+        for (int d = 0; d < 4 && op_idx < NUM_OPERATIONS; d++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "cube");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%s", cube_rot[r]);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%s", dirs[d]);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Cube rotation %s%s", cube_rot[r], dirs[d]);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                    "('cube', '%s', '%s', 'Cube rotation %s%s')", cube_rot[r], dirs[d], cube_rot[r], dirs[d]);
+            op_idx++;
+        }
+    }
+    
+    /* Swap operations: 3 axes x 4 offsets = 12 ops */
+    for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
+        for (int k = 0; k < 4 && op_idx < NUM_OPERATIONS; k++) {
+            snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "swap");
+            snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
+            snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "%d", k);
+            snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Swap axis=%d, offset=%d", axis, k);
+            snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                    "('swap', %d, %d, 'Swap axis=%d, offset=%d')", axis, k, axis, k);
+            op_idx++;
+        }
+    }
+    
+    /* Diagonal flip operations: 3 axes = 3 ops */
+    for (int axis = 0; axis < 3 && op_idx < NUM_OPERATIONS; axis++) {
+        snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "diagflip");
+        snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", axis);
+        snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "");
+        snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Diagonal flip axis=%d", axis);
+        snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                "('diagflip', %d, '', 'Diagonal flip axis=%d')", axis, axis);
+        op_idx++;
+    }
+    
+    /* Fill remaining slots with dynamic operations */
+    while (op_idx < NUM_OPERATIONS) {
+        int dyn_id = op_idx - 87;  /* Dynamic operations start at index 87 */
+        snprintf(g_operations[op_idx].type, sizeof(g_operations[op_idx].type), "dynamic");
+        snprintf(g_operations[op_idx].param1, sizeof(g_operations[op_idx].param1), "%d", dyn_id);
+        snprintf(g_operations[op_idx].param2, sizeof(g_operations[op_idx].param2), "chain");
+        snprintf(g_operations[op_idx].desc, sizeof(g_operations[op_idx].desc), "Dynamic ASCII op %d", dyn_id + 1);
+        snprintf(g_operations[op_idx].str_repr, sizeof(g_operations[op_idx].str_repr),
+                "('dynamic', %d, 'chain', 'Dynamic ASCII op %d')", dyn_id, dyn_id + 1);
+        op_idx++;
+    }
+    
+    g_operations_initialized = 1;
 }
 
 /* Generate key-dependent S-box using SHA-256 */
@@ -366,20 +483,25 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
                         ((int)subop_seed_hash[2] << 8) | 
                         ((int)subop_seed_hash[3]);
         if (sub_op_id < 0) sub_op_id = -sub_op_id;
+        sub_op_id = sub_op_id % NUM_OPERATIONS;  /* Ensure valid index */
         
-        /* Now generate permutation using sub_op_id (NOT op_id) */
-        uint8_t subop_input[256];
-        offset = 0;
+        /* CRITICAL FIX: Use operation's string representation (matching Python's str(op))
+         * Python: op_hash = hashlib.sha256(str(op).encode() + self.key).digest()
+         * where str(op) = "('face', 'U', '', 'Rotate U face ')" or similar
+         * 
+         * C: Use g_operations[sub_op_id].str_repr + key */
+        uint8_t subop_input[512];  /* Increased size for string representation */
+        int offset = 0;
         
+        /* Copy operation string representation (matches Python's str(op)) */
+        const char *op_str = g_operations[sub_op_id].str_repr;
+        int op_str_len = strlen(op_str);
+        memcpy(subop_input + offset, op_str, op_str_len);
+        offset += op_str_len;
+        
+        /* Append key (matches Python: str(op).encode() + self.key) */
         memcpy(subop_input + offset, cipher->key, cipher->key_len);
         offset += cipher->key_len;
-        memcpy(subop_input + offset, "WBC1_OP", 7);
-        offset += 7;
-        /* Use sub_op_id here, not op_id - this is the key difference */
-        subop_input[offset++] = (sub_op_id >> 24) & 0xFF;
-        subop_input[offset++] = (sub_op_id >> 16) & 0xFF;
-        subop_input[offset++] = (sub_op_id >> 8) & 0xFF;
-        subop_input[offset++] = sub_op_id & 0xFF;
         
         uint8_t subop_hash[SHA256_DIGEST_LENGTH];
         sha256_hash(subop_input, offset, subop_hash);
@@ -475,6 +597,9 @@ static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direc
 /* ===== Cipher Operations ===== */
 
 void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_rounds, int algorithm_mode) {
+    /* Initialize operations array (once) with metadata matching Python */
+    init_operations(key, key_len);
+    
     cipher->key = malloc(key_len);
     memcpy(cipher->key, key, key_len);
     cipher->key_len = key_len;
