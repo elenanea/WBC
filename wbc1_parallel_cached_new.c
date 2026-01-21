@@ -667,12 +667,6 @@ static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse) {
 }
 
 /* XOR with round key */
-static void xor_with_key(uint8_t *block, const uint8_t *key, int size) {
-    for (int i = 0; i < size; i++) {
-        block[i] ^= key[i];
-    }
-}
-
 /* Cumulative XOR diffusion: Y[0]=X[0], Y[i]=X[i]^Y[i-1] */
 static void cumulative_xor(uint8_t *block, int size, int inverse) {
     if (inverse) {
@@ -693,80 +687,6 @@ static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direc
     shift = shift % 8;
     for (int i = 0; i < size; i++) {
         block[i] = (direction == 0) ? rotate_right(block[i], shift) : rotate_left(block[i], shift);
-    }
-}
-
-/* ===== ENHANCED MODE 0 FUNCTIONS (Preserving Rubik's Cube Analogy) ===== */
-
-/* Key-dependent byte transposition (analogous to twisting cube layers) */
-static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse) {
-    if (size < 4) return; /* Need at least 4 bytes for meaningful transposition */
-    
-    uint8_t temp[16];  /* Temporary buffer for BLOCK_SIZE */
-    memcpy(temp, block, size);
-    
-    if (!inverse) {
-        /* Forward transposition using round key to determine swaps */
-        for (int i = 0; i < size; i++) {
-            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
-            block[j] = temp[i];
-        }
-    } else {
-        /* Inverse transposition - reconstruct original positions */
-        uint8_t inverse_map[16];
-        for (int i = 0; i < size; i++) {
-            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
-            inverse_map[j] = i;
-        }
-        for (int i = 0; i < size; i++) {
-            block[inverse_map[i]] = temp[i];
-        }
-    }
-}
-
-/* Multi-layer diffusion (analogous to rotating multiple cube faces) */
-static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round_key, int inverse) {
-    if (size < 2) return;
-    
-    if (!inverse) {
-        /* Layer 1: XOR with neighbors (horizontal face rotation) */
-        for (int i = 0; i < size - 1; i++) {
-            block[i] ^= block[i + 1] ^ round_key[i % 32];
-        }
-        block[size - 1] ^= block[0] ^ round_key[(size - 1) % 32];
-        
-        /* Layer 2: XOR with distance-2 neighbors (diagonal twist) */
-        if (size >= 4) {
-            for (int i = 0; i < size; i++) {
-                block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
-            }
-        }
-    } else {
-        /* Inverse Layer 2 - must be done in reverse order due to circular dependencies */
-        if (size >= 4) {
-            for (int i = size - 1; i >= 0; i--) {
-                block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
-            }
-        }
-        
-        /* Inverse Layer 1 - properly reverse the forward operation */
-        block[size - 1] ^= block[0] ^ round_key[(size - 1) % 32];
-        
-        for (int i = size - 2; i >= 0; i--) {
-            block[i] ^= block[i + 1] ^ round_key[i % 32];
-        }
-    }
-}
-
-/* Enhanced cascading rotation (analogous to rotating sub-cubes at different speeds) */
-static void cascading_bit_rotation(uint8_t *block, int size, const uint8_t *round_key, int direction) {
-    /* Apply different rotation amounts to different byte positions */
-    for (int i = 0; i < size; i++) {
-        /* Use round key to determine rotation amount for each byte */
-        int shift = (round_key[i % 32] + round_key[(i + 8) % 32] + i) % 8;
-        if (shift > 0) {
-            block[i] = (direction == 0) ? rotate_right(block[i], shift) : rotate_left(block[i], shift);
-        }
     }
 }
 
