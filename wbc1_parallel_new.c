@@ -108,9 +108,9 @@ static void generate_inverse_permutation(WBC1Cipher *cipher);
 static void generate_round_keys(WBC1Cipher *cipher);
 static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
-static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
 static void cumulative_xor(uint8_t *block, int size, int inverse);
 static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction);
+static void print_operations_table(WBC1Cipher *cipher);
 
 /* Cipher operations */
 void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_rounds, int algorithm_mode);
@@ -1336,6 +1336,80 @@ double correlation_test(const uint8_t *data1, const uint8_t *data2, int len) {
     return numerator / sqrt(denom1 * denom2);
 }
 
+/* Function to print operations table */
+static void print_operations_table(WBC1Cipher *cipher) {
+    printf("\n");
+    printf("======================================================================\n");
+    printf("          ТАБЛИЦА ПЕРЕСТАНОВОК / OPERATIONS TABLE\n");
+    printf("======================================================================\n");
+    printf("%-6s %-8s %-8s %-50s %s\n", "Номер", "ASCII", "Hex", "Операция", "Описание");
+    printf("%-6s %-8s %-8s %-50s %s\n", "Number", "Char", "Code", "Operation", "Description");
+    printf("----------------------------------------------------------------------\n");
+    
+    for (int i = 0; i < NUM_OPERATIONS; i++) {
+        Operation *op = &cipher->operations[i];
+        
+        /* ASCII character (printable or . for non-printable) */
+        char ascii_char[10];
+        if (i >= 32 && i < 127) {
+            snprintf(ascii_char, sizeof(ascii_char), "%c", (char)i);
+        } else {
+            snprintf(ascii_char, sizeof(ascii_char), ".");
+        }
+        
+        /* Hex representation */
+        char hex[10];
+        snprintf(hex, sizeof(hex), "0x%02X", i);
+        
+        /* Operation type and parameters */
+        char operation[51];
+        if (strcmp(op->type, "dynamic") == 0) {
+            if (op->chain_length > 0) {
+                snprintf(operation, sizeof(operation), "Dynamic[%d ops]", op->chain_length);
+            } else {
+                snprintf(operation, sizeof(operation), "Dynamic");
+            }
+        } else if (strcmp(op->type, "face") == 0) {
+            snprintf(operation, sizeof(operation), "Face %s%s", op->param1, op->param2);
+        } else if (strcmp(op->type, "slice") == 0) {
+            snprintf(operation, sizeof(operation), "Slice %s%s", op->param1, op->param2);
+        } else if (strcmp(op->type, "wide") == 0) {
+            snprintf(operation, sizeof(operation), "Wide %s%s", op->param1, op->param2);
+        } else if (strcmp(op->type, "cube") == 0) {
+            snprintf(operation, sizeof(operation), "Cube %s%s", op->param1, op->param2);
+        } else if (strcmp(op->type, "alg") == 0) {
+            snprintf(operation, sizeof(operation), "Alg:%s", op->param1);
+        } else if (strcmp(op->type, "pattern") == 0) {
+            snprintf(operation, sizeof(operation), "Pat:%s", op->param1);
+        } else if (strcmp(op->type, "swap") == 0) {
+            snprintf(operation, sizeof(operation), "Swap ax=%s off=%s", op->param1, op->param2);
+        } else if (strcmp(op->type, "diagflip") == 0) {
+            snprintf(operation, sizeof(operation), "DiagFlip ax=%s", op->param1);
+        } else {
+            snprintf(operation, sizeof(operation), "%s", op->type);
+        }
+        
+        /* Description (truncate if too long) */
+        char description[50];
+        if (strlen(op->desc) > 45) {
+            strncpy(description, op->desc, 42);
+            description[42] = '.';
+            description[43] = '.';
+            description[44] = '.';
+            description[45] = '\0';
+        } else {
+            strncpy(description, op->desc, sizeof(description) - 1);
+            description[sizeof(description) - 1] = '\0';
+        }
+        
+        printf("%-6d %-8s %-8s %-50s %s\n", i, ascii_char, hex, operation, description);
+    }
+    
+    printf("======================================================================\n");
+    printf("Всего операций / Total operations: %d\n", NUM_OPERATIONS);
+    printf("======================================================================\n\n");
+}
+
 /* ===== Main Test Function ===== */
 
 int main(int argc, char **argv) {
@@ -1376,13 +1450,14 @@ int main(int argc, char **argv) {
         }
     } else if (rank == 0) {
         printf("Usage: %s <algorithm_mode> <key_bits> <key_source> <rounds> <task> [data_kb]\n", argv[0]);
-        printf("  algorithm_mode: 0=simplified (2 ops), 1=full (5 ops)\n");
+        printf("  algorithm_mode: 0=simplified (32 ops/round), 1=full (160 ops/round)\n");
         printf("  key_bits: key size in bits (128, 192, 256, etc.)\n");
         printf("  key_source: 0=auto-generate, 1=user-provided (C version always auto-generates)\n");
         printf("  rounds: number of encryption rounds\n");
-        printf("  task: 0=text encryption, 1=statistical analysis\n");
+        printf("  task: 0=text encryption, 1=statistical analysis, 2=print operations table\n");
         printf("  data_kb: data size in KB for task=1 (optional)\n\n");
-        printf("Example: mpirun -n 4 %s 1 256 0 32 0\n", argv[0]);
+        printf("Example: mpirun -n 4 %s 1 256 0 16 0\n", argv[0]);
+        printf("Example: mpirun -n 1 %s 0 256 0 16 2  (print operations table)\n", argv[0]);
     }
     
     /* Generate key based on key_bits */
@@ -1402,6 +1477,33 @@ int main(int argc, char **argv) {
     int base_len = strlen(key_base);
     for (int i = 0; i < key_len; i++) {
         key[i] = (i < base_len) ? key_base[i] : (uint8_t)(i * 7 + 13);
+    }
+    
+    /* Initialize cipher */
+    WBC1Cipher cipher;
+    wbc1_init(&cipher, key, key_len, num_rounds, algorithm_mode);
+    
+    /* Handle task=2: Print operations table */
+    if (task == 2) {
+        if (rank == 0) {
+            printf("======================================================================\n");
+            printf("ПАРАЛЛЕЛЬНЫЙ ШИФР WBC1 / PARALLEL WBC1 CIPHER (C Implementation)\n");
+            printf("======================================================================\n");
+            printf("Количество MPI процессов / MPI processes: %d\n", size);
+            printf("Режим / Mode: %s\n", algorithm_mode == MODE_FULL ? "1 (Full - 160 ops/round)" : "0 (Simplified - 32 ops/round)");
+            printf("Размер ключа / Key size: %d бит / bits (%d байт / bytes)\n", key_bits, key_len);
+            printf("Размер блока / Block size: %d байт / bytes\n", BLOCK_SIZE);
+            printf("Количество раундов / Rounds: %d\n", num_rounds);
+            printf("Задача / Task: Вывод таблицы операций / Print operations table\n");
+            printf("======================================================================\n");
+            
+            print_operations_table(&cipher);
+        }
+        
+        wbc1_free(&cipher);
+        free(key);
+        MPI_Finalize();
+        return 0;
     }
     
     /* Prepare test data based on task */
@@ -1485,10 +1587,6 @@ int main(int argc, char **argv) {
             printf("...\n\n");
         }
     }
-    
-    /* Initialize cipher */
-    WBC1Cipher cipher;
-    wbc1_init(&cipher, key, key_len, num_rounds, algorithm_mode);
     
     /* Encrypt */
     MPI_Barrier(MPI_COMM_WORLD);
