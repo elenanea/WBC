@@ -24,12 +24,14 @@ SRC_BASIC = wbc1_parallel.c
 SRC_CACHED = wbc1_parallel_cached.c
 SRC_BASIC_NEW = wbc1_parallel_new.c
 SRC_CACHED_NEW = wbc1_parallel_cached_new.c
+SRC_MINIMAL = wbc1_parallel_minimal.c
 
 # Output binaries
 BIN_BASIC = wbc1_parallel
 BIN_CACHED = wbc1_parallel_cached
 BIN_BASIC_NEW = wbc1_parallel_new
 BIN_CACHED_NEW = wbc1_parallel_cached_new
+BIN_MINIMAL = wbc1_parallel_minimal
 
 # Default target
 all: basic cached
@@ -39,6 +41,12 @@ all-new: basic cached new
 
 # Build enhanced versions
 new: basic-new cached-new
+
+# Build minimal enhanced version (Mode 0 with multi-axis rotations only)
+minimal: $(BIN_MINIMAL)
+
+$(BIN_MINIMAL): $(SRC_MINIMAL)
+	$(MPICC) $(CFLAGS) -o $(BIN_MINIMAL) $(SRC_MINIMAL) $(LDFLAGS)
 
 # Build basic version
 basic: $(BIN_BASIC)
@@ -66,7 +74,7 @@ $(BIN_CACHED_NEW): $(SRC_CACHED_NEW)
 
 # Clean build artifacts
 clean:
-	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) *.o
+	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_MINIMAL) *.o
 
 # Run tests
 test: test-basic test-cached
