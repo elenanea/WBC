@@ -124,9 +124,7 @@ static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
 static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction);
 static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
-static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse);
 static void two_layer_diffusion(uint8_t *block, int size, int inverse);
-static void cascading_bit_rotation(uint8_t *block, int size, const uint8_t *round_key, int direction);
 static void print_operations_table(WBC1Cipher *cipher);
 
 /* Cipher operations */
@@ -687,29 +685,6 @@ static void xor_with_key(uint8_t *block, const uint8_t *key, int size) {
 }
 
 /* Key-dependent byte transposition (analogous to twisting cube layers) */
-static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse) {
-    if (size < 4) return;
-    
-    uint8_t temp[16];
-    memcpy(temp, block, size);
-    
-    if (!inverse) {
-        for (int i = 0; i < size; i++) {
-            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
-            block[j] = temp[i];
-        }
-    } else {
-        uint8_t inverse_map[16];
-        for (int i = 0; i < size; i++) {
-            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
-            inverse_map[j] = i;
-        }
-        for (int i = 0; i < size; i++) {
-            block[inverse_map[i]] = temp[i];
-        }
-    }
-}
-
 /* Multi-layer diffusion (analogous to rotating multiple cube faces) */
 /* Two-layer diffusion: Forward cumulative + Backward cumulative XOR */
 static void two_layer_diffusion(uint8_t *block, int size, int inverse) {
@@ -736,16 +711,6 @@ static void two_layer_diffusion(uint8_t *block, int size, int inverse) {
         /* Inverse forward pass: X[i] = Y[i] ^ Y[i-1] */
         for (int i = size - 1; i >= 1; i--) {
             block[i] ^= block[i - 1];
-        }
-    }
-}
-
-/* Enhanced cascading rotation (analogous to rotating sub-cubes at different speeds) */
-static void cascading_bit_rotation(uint8_t *block, int size, const uint8_t *round_key, int direction) {
-    for (int i = 0; i < size; i++) {
-        int shift = (round_key[i % 32] + round_key[(i + 8) % 32] + i) % 8;
-        if (shift > 0) {
-            block[i] = (direction == 0) ? rotate_right(block[i], shift) : rotate_left(block[i], shift);
         }
     }
 }
