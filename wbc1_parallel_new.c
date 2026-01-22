@@ -784,22 +784,6 @@ static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse) {
     }
 }
 
-/* XOR with round key */
-/* Cumulative XOR diffusion: Y[0]=X[0], Y[i]=X[i]^Y[i-1] */
-static void cumulative_xor(uint8_t *block, int size, int inverse) {
-    if (inverse) {
-        /* Inverse: backward cumulative XOR */
-        for (int i = size - 1; i > 0; i--) {
-            block[i] ^= block[i - 1];
-        }
-    } else {
-        /* Forward: cumulative XOR */
-        for (int i = 1; i < size; i++) {
-            block[i] ^= block[i - 1];
-        }
-    }
-}
-
 /* Cyclic bitwise rotation on all bytes */
 static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction) {
     shift = shift % 8;
