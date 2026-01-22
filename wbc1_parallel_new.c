@@ -1580,8 +1580,8 @@ int main(int argc, char **argv) {
                                    "The implementation supports both simplified (2 operations per round) and full (5 operations per round) algorithm modes. "
                                    "It uses MPI for distributed parallel processing across multiple nodes. ";
         
-        /* Repeat for larger test */
-        int repeat_count = 4;
+        /* Use text once (not repeated) */
+        int repeat_count = 1;
         plain_len = strlen(plaintext_str) * repeat_count;
         plaintext = malloc(plain_len);
         if (!plaintext) {
