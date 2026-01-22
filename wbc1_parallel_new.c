@@ -110,6 +110,10 @@ static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int i
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
 static void cumulative_xor(uint8_t *block, int size, int inverse);
 static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction);
+static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
+static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse);
+static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round_key, int inverse);
+static void cascading_bit_rotation(uint8_t *block, int size, const uint8_t *round_key, int direction);
 static void print_operations_table(WBC1Cipher *cipher);
 
 /* Cipher operations */
@@ -804,6 +808,90 @@ static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direc
     }
 }
 
+/* ===== ENHANCED MODE 0 FUNCTIONS (Preserving Rubik's Cube Analogy) ===== */
+
+/* XOR entire block with key */
+static void xor_with_key(uint8_t *block, const uint8_t *key, int size) {
+    for (int i = 0; i < size; i++) {
+        block[i] ^= key[i];
+    }
+}
+
+/* Key-dependent byte transposition (analogous to twisting cube layers) */
+static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse) {
+    if (size < 4) return;
+    
+    uint8_t temp[16];
+    memcpy(temp, block, size);
+    
+    if (!inverse) {
+        for (int i = 0; i < size; i++) {
+            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
+            block[j] = temp[i];
+        }
+    } else {
+        uint8_t inverse_map[16];
+        for (int i = 0; i < size; i++) {
+            int j = (i + round_key[i % 32] + round_key[(i + 1) % 32]) % size;
+            inverse_map[j] = i;
+        }
+        for (int i = 0; i < size; i++) {
+            block[inverse_map[i]] = temp[i];
+        }
+    }
+}
+
+/* Multi-layer diffusion (analogous to rotating multiple cube faces) */
+static void multi_layer_diffusion(uint8_t *block, int size, const uint8_t *round_key, int inverse) {
+    if (size < 2) return;
+    
+    if (!inverse) {
+        /* Layer 1: XOR with neighbors */
+        uint8_t first = block[0];
+        for (int i = 0; i < size - 1; i++) {
+            block[i] ^= block[i + 1] ^ round_key[i % 32];
+        }
+        block[size - 1] ^= first ^ round_key[(size - 1) % 32];
+        
+        /* Layer 2: XOR with distance-2 neighbors */
+        if (size >= 4) {
+            for (int i = 0; i < size; i++) {
+                block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
+            }
+        }
+    } else {
+        /* Inverse Layer 2 */
+        if (size >= 4) {
+            for (int i = size - 1; i >= 0; i--) {
+                block[i] ^= block[(i + 2) % size] ^ round_key[(i + 16) % 32];
+            }
+        }
+        
+        /* Inverse Layer 1 */
+        uint8_t first = block[0];
+        uint8_t last = block[size - 1];
+        for (int i = 0; i < size - 1; i++) {
+            first ^= block[i + 1] ^ round_key[i % 32];
+        }
+        last ^= first ^ round_key[(size - 1) % 32];
+        
+        for (int i = size - 1; i > 0; i--) {
+            block[i] ^= block[i - 1] ^ round_key[(i - 1) % 32];
+        }
+        block[0] = first;
+    }
+}
+
+/* Enhanced cascading rotation (analogous to rotating sub-cubes at different speeds) */
+static void cascading_bit_rotation(uint8_t *block, int size, const uint8_t *round_key, int direction) {
+    for (int i = 0; i < size; i++) {
+        int shift = (round_key[i % 32] + round_key[(i + 8) % 32] + i) % 8;
+        if (shift > 0) {
+            block[i] = (direction == 0) ? rotate_right(block[i], shift) : rotate_left(block[i], shift);
+        }
+    }
+}
+
 /* ===== Cipher Operations ===== */
 
 void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_rounds, int algorithm_mode) {
@@ -848,46 +936,59 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
     memcpy(ciphertext, plaintext, cipher->block_size);
     
     for (int round = 0; round < cipher->num_rounds; round++) {
-        /* Process all 32 key bytes sequentially */
-        for (int key_byte_idx = 0; key_byte_idx < 32; key_byte_idx++) {
-            /* Select operation from table P based on key byte value */
-            uint8_t key_byte = cipher->key[key_byte_idx];
-            int op_id = key_byte % NUM_OPERATIONS;
+        if (cipher->algorithm_mode == MODE_FULL) {
+            /* MODE 1: Full algorithm with 5 steps per round */
             
-            if (cipher->algorithm_mode == MODE_FULL) {
-                /* MODE 1: Full algorithm with 5 operations per key byte */
-                
-                /* 1. Dynamic Rubik's cube operation */
+            /* Step 1: Permutation step - iterate through all 32 key bytes */
+            for (int i = 0; i < 32; i++) {
+                int op_id = cipher->key[i] % NUM_OPERATIONS;
                 apply_operation(cipher, ciphertext, op_id, 0);
                 
-                /* 2. XOR with round key byte */
-                for (int i = 0; i < cipher->block_size; i++) {
-                    ciphertext[i] ^= cipher->round_keys[round][key_byte_idx % 32];
-                }
-                
-                /* 3. S-box substitution */
-                substitute_bytes(cipher, ciphertext, 0);
-                
-                /* 4. Cumulative XOR diffusion */
-                cumulative_xor(ciphertext, cipher->block_size, 0);
-                
-                /* 5. Cyclic bitwise rotation - shift by (op_id % 8) bits */
-                int shift = op_id % 8;
-                if (shift > 0) {
-                    cyclic_bitwise_rotate(ciphertext, cipher->block_size, shift, 0);
-                }
-            } else {
-                /* MODE 0: Simplified algorithm - operation + rotation per key byte */
-                
-                /* 1. Dynamic Rubik's cube operation */
-                apply_operation(cipher, ciphertext, op_id, 0);
-                
-                /* 2. Cyclic bitwise rotation - shift by (op_id % 8) bits */
                 int shift = op_id % 8;
                 if (shift > 0) {
                     cyclic_bitwise_rotate(ciphertext, cipher->block_size, shift, 0);
                 }
             }
+            
+            /* Step 2: XOR with round key (once per round) */
+            xor_with_key(ciphertext, cipher->round_keys[round], cipher->block_size);
+            
+            /* Step 3: S-box substitution (once) */
+            substitute_bytes(cipher, ciphertext, 0);
+            
+            /* Step 4: Multi-layer diffusion (once) */
+            multi_layer_diffusion(ciphertext, cipher->block_size, cipher->round_keys[round], 0);
+            
+            /* Step 5: Cyclic bitwise rotation (once) */
+            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
+            cyclic_bitwise_rotate(ciphertext, cipher->block_size, shift, 0);
+        } else {
+            /* MODE 0: Enhanced simplified algorithm (6 operations per round) */
+            
+            /* 1. Primary Rubik's cube rotation (main face) */
+            int op_id1 = cipher->round_keys[round][0] % NUM_OPERATIONS;
+            apply_operation(cipher, ciphertext, op_id1, 0);
+            
+            /* 2. Secondary Rubik's cube rotation (perpendicular face) */
+            int op_id2 = cipher->round_keys[round][1] % NUM_OPERATIONS;
+            if (op_id2 != op_id1) {
+                apply_operation(cipher, ciphertext, op_id2, 0);
+            }
+            
+            /* 3. Key-dependent byte transposition (cube layer twisting) */
+            key_dependent_transpose(ciphertext, cipher->block_size, cipher->round_keys[round], 0);
+            
+            /* 4. Multi-layer diffusion (rotating multiple faces simultaneously) */
+            multi_layer_diffusion(ciphertext, cipher->block_size, cipher->round_keys[round], 0);
+            
+            /* 5. Tertiary Rubik's cube rotation (third axis) */
+            int op_id3 = cipher->round_keys[round][2] % NUM_OPERATIONS;
+            if (op_id3 != op_id1 && op_id3 != op_id2) {
+                apply_operation(cipher, ciphertext, op_id3, 0);
+            }
+            
+            /* 6. Cascading bit rotation (sub-cube rotations at different speeds) */
+            cascading_bit_rotation(ciphertext, cipher->block_size, cipher->round_keys[round], 0);
         }
     }
 }
@@ -895,48 +996,61 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
 void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *plaintext) {
     memcpy(plaintext, ciphertext, cipher->block_size);
     
-    /* Process rounds in reverse order */
     for (int round = cipher->num_rounds - 1; round >= 0; round--) {
-        /* Process all 32 key bytes in reverse order */
-        for (int key_byte_idx = 31; key_byte_idx >= 0; key_byte_idx--) {
-            /* Select operation from table P based on key byte value */
-            uint8_t key_byte = cipher->key[key_byte_idx];
-            int op_id = key_byte % NUM_OPERATIONS;
+        if (cipher->algorithm_mode == MODE_FULL) {
+            /* MODE 1: Full algorithm - reverse order */
             
-            if (cipher->algorithm_mode == MODE_FULL) {
-                /* MODE 1: Full algorithm - reverse order of operations */
+            /* Step 5: Inverse cyclic bitwise rotation */
+            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
+            cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
+            
+            /* Step 4: Inverse multi-layer diffusion */
+            multi_layer_diffusion(plaintext, cipher->block_size, cipher->round_keys[round], 1);
+            
+            /* Step 3: Inverse S-box substitution */
+            substitute_bytes(cipher, plaintext, 1);
+            
+            /* Step 2: XOR with round key (self-inverse) */
+            xor_with_key(plaintext, cipher->round_keys[round], cipher->block_size);
+            
+            /* Step 1: Inverse permutation - process key bytes in reverse */
+            for (int i = 31; i >= 0; i--) {
+                int op_id = cipher->key[i] % NUM_OPERATIONS;
                 
-                /* 5. Inverse cyclic bitwise rotation */
-                int shift = op_id % 8;
-                if (shift > 0) {
-                    cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
+                int shift_val = op_id % 8;
+                if (shift_val > 0) {
+                    cyclic_bitwise_rotate(plaintext, cipher->block_size, shift_val, 1);
                 }
                 
-                /* 4. Inverse cumulative XOR diffusion */
-                cumulative_xor(plaintext, cipher->block_size, 1);
-                
-                /* 3. Inverse S-box substitution */
-                substitute_bytes(cipher, plaintext, 1);
-                
-                /* 2. XOR with round key byte (self-inverse) */
-                for (int i = 0; i < cipher->block_size; i++) {
-                    plaintext[i] ^= cipher->round_keys[round][key_byte_idx % 32];
-                }
-                
-                /* 1. Inverse dynamic Rubik's cube operation */
-                apply_operation(cipher, plaintext, op_id, 1);
-            } else {
-                /* MODE 0: Simplified algorithm - reverse order */
-                
-                /* 2. Inverse cyclic bitwise rotation */
-                int shift = op_id % 8;
-                if (shift > 0) {
-                    cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
-                }
-                
-                /* 1. Inverse dynamic Rubik's cube operation */
                 apply_operation(cipher, plaintext, op_id, 1);
             }
+        } else {
+            /* MODE 0: Enhanced simplified algorithm - reverse order */
+            
+            /* 6. Inverse cascading bit rotation */
+            cascading_bit_rotation(plaintext, cipher->block_size, cipher->round_keys[round], 1);
+            
+            /* 5. Inverse tertiary Rubik's cube rotation */
+            int op_id3 = cipher->round_keys[round][2] % NUM_OPERATIONS;
+            int op_id1 = cipher->round_keys[round][0] % NUM_OPERATIONS;
+            int op_id2 = cipher->round_keys[round][1] % NUM_OPERATIONS;
+            if (op_id3 != op_id1 && op_id3 != op_id2) {
+                apply_operation(cipher, plaintext, op_id3, 1);
+            }
+            
+            /* 4. Inverse multi-layer diffusion */
+            multi_layer_diffusion(plaintext, cipher->block_size, cipher->round_keys[round], 1);
+            
+            /* 3. Inverse key-dependent byte transposition */
+            key_dependent_transpose(plaintext, cipher->block_size, cipher->round_keys[round], 1);
+            
+            /* 2. Inverse secondary Rubik's cube rotation */
+            if (op_id2 != op_id1) {
+                apply_operation(cipher, plaintext, op_id2, 1);
+            }
+            
+            /* 1. Inverse primary Rubik's cube rotation */
+            apply_operation(cipher, plaintext, op_id1, 1);
         }
     }
 }
