@@ -108,7 +108,6 @@ static void generate_inverse_permutation(WBC1Cipher *cipher);
 static void generate_round_keys(WBC1Cipher *cipher);
 static void apply_operation(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
-static void cumulative_xor(uint8_t *block, int size, int inverse);
 static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction);
 static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
 static void key_dependent_transpose(uint8_t *block, int size, const uint8_t *round_key, int inverse);
