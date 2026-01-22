@@ -1470,7 +1470,6 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "  1 = statistical analysis\n");
                 fprintf(stderr, "  2 = print operations table\n");
             }
-            free(key);
             MPI_Finalize();
             return 1;
         }
@@ -1478,7 +1477,6 @@ int main(int argc, char **argv) {
             if (rank == 0) {
                 fprintf(stderr, "Error: Invalid algorithm_mode %d. Must be 0 or 1.\n", algorithm_mode);
             }
-            free(key);
             MPI_Finalize();
             return 1;
         }
@@ -1493,7 +1491,6 @@ int main(int argc, char **argv) {
         printf("Example: mpirun -n 4 %s 1 256 0 16 0\n", argv[0]);
         printf("Example: mpirun -n 1 %s 0 256 0 16 1 10  (statistical analysis with 10KB data)\n", argv[0]);
         printf("Example: mpirun -n 1 %s 0 256 0 16 2  (print operations table)\n", argv[0]);
-        free(key);
         MPI_Finalize();
         return 0;
     }
