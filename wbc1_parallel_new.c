@@ -1633,11 +1633,12 @@ int main(int argc, char **argv) {
     if (rank == 0) {
         printf("Encrypted ciphertext length: %d bytes\n", ciphertext_len);
         if (task == 0) {
-            printf("Ciphertext (hex, first 128 bytes): ");
-            for (int i = 0; i < 128 && i < ciphertext_len; i++) {
+            printf("Ciphertext (hex, full):\n");
+            for (int i = 0; i < ciphertext_len; i++) {
                 printf("%02x", ciphertext[i]);
+                if ((i + 1) % 64 == 0) printf("\n");  // Line break every 64 bytes for readability
             }
-            printf("...\n");
+            if (ciphertext_len % 64 != 0) printf("\n");
         } else {
             printf("Ciphertext (hex, first 64 bytes): ");
             for (int i = 0; i < 64 && i < ciphertext_len; i++) {
