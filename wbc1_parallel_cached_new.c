@@ -1558,10 +1558,8 @@ int main(int argc, char **argv) {
     
     if (rank == 0) {
         printf("Decrypted plaintext length: %d bytes\n", decrypted_len);
-        if (task == 0 && decrypted_len <= 200) {
-            printf("Decrypted plaintext: %.*s\n", decrypted_len, decrypted);
-        } else if (task == 0) {
-            printf("Decrypted plaintext: %.80s...\n", decrypted);
+        if (task == 0) {
+            printf("Decrypted plaintext:\n%.*s\n", decrypted_len, decrypted);
         } else {
             printf("Decrypted data (first 64 bytes, hex): ");
             for (int i = 0; i < 64 && i < decrypted_len; i++) {

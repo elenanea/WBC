@@ -1610,10 +1610,8 @@ int main(int argc, char **argv) {
         }
         printf("======================================================================\n");
         printf("\nДлина открытого текста / Original plaintext length: %d байт / bytes\n", plain_len);
-        if (task == 0 && plain_len <= 200) {
-            printf("Открытый текст / Original plaintext: %.*s\n\n", plain_len, plaintext);
-        } else if (task == 0) {
-            printf("Открытый текст / Original plaintext: %.80s...\n\n", plaintext);
+        if (task == 0) {
+            printf("Открытый текст / Original plaintext:\n%.*s\n\n", plain_len, plaintext);
         } else {
             printf("Данные (первые 64 байта, hex) / Data (first 64 bytes, hex): ");
             for (int i = 0; i < 64 && i < plain_len; i++) {
@@ -1666,10 +1664,8 @@ int main(int argc, char **argv) {
     
     if (rank == 0) {
         printf("Decrypted plaintext length: %d bytes\n", decrypted_len);
-        if (task == 0 && decrypted_len <= 200) {
-            printf("Decrypted plaintext: %.*s\n", decrypted_len, decrypted);
-        } else if (task == 0) {
-            printf("Decrypted plaintext: %.80s...\n", decrypted);
+        if (task == 0) {
+            printf("Decrypted plaintext:\n%.*s\n", decrypted_len, decrypted);
         } else {
             printf("Decrypted data (first 64 bytes, hex): ");
             for (int i = 0; i < 64 && i < decrypted_len; i++) {
