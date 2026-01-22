@@ -1470,16 +1470,41 @@ int main(int argc, char **argv) {
         if (argc >= 7 && task == 1) {
             data_kb = atoi(argv[6]);
         }
+        
+        /* Validate parameters */
+        if (task < 0 || task > 2) {
+            if (rank == 0) {
+                fprintf(stderr, "Error: Invalid task value %d. Task must be 0, 1, or 2.\n", task);
+                fprintf(stderr, "  0 = text encryption\n");
+                fprintf(stderr, "  1 = statistical analysis\n");
+                fprintf(stderr, "  2 = print operations table\n");
+            }
+            free(key);
+            MPI_Finalize();
+            return 1;
+        }
+        if (algorithm_mode < 0 || algorithm_mode > 1) {
+            if (rank == 0) {
+                fprintf(stderr, "Error: Invalid algorithm_mode %d. Must be 0 or 1.\n", algorithm_mode);
+            }
+            free(key);
+            MPI_Finalize();
+            return 1;
+        }
     } else if (rank == 0) {
         printf("Usage: %s <algorithm_mode> <key_bits> <key_source> <rounds> <task> [data_kb]\n", argv[0]);
-        printf("  algorithm_mode: 0=simplified (32 ops/round), 1=full (160 ops/round)\n");
+        printf("  algorithm_mode: 0=simplified (2 ops/round), 1=full (5 ops/round)\n");
         printf("  key_bits: key size in bits (128, 192, 256, etc.)\n");
         printf("  key_source: 0=auto-generate, 1=user-provided (C version always auto-generates)\n");
         printf("  rounds: number of encryption rounds\n");
         printf("  task: 0=text encryption, 1=statistical analysis, 2=print operations table\n");
-        printf("  data_kb: data size in KB for task=1 (optional)\n\n");
+        printf("  data_kb: data size in KB for task=1 (optional, default=1)\n\n");
         printf("Example: mpirun -n 4 %s 1 256 0 16 0\n", argv[0]);
+        printf("Example: mpirun -n 1 %s 0 256 0 16 1 10  (statistical analysis with 10KB data)\n", argv[0]);
         printf("Example: mpirun -n 1 %s 0 256 0 16 2  (print operations table)\n", argv[0]);
+        free(key);
+        MPI_Finalize();
+        return 0;
     }
     
     /* Generate key based on key_bits */
