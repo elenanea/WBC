@@ -1,7 +1,7 @@
 /*
  * WBC1 Block Cipher - ENHANCED Parallel Implementation with MPI and Pre-computed Operations Cache
  * 
- * === ENHANCED VERSION with Improved Mode 0 Avalanche ===
+ * === ENHANCED VERSION with Improved Avalanche Effect ===
  * 
  * PERFORMANCE OPTIMIZED VERSION:
  * This version pre-computes and caches all 127 operation permutations during cipher 
@@ -12,34 +12,35 @@
  * This implementation includes:
  * - Key-dependent S-box generation using SHA-256
  * - 127 dynamic Rubik's cube permutation operations (pre-computed and cached)
- * - XOR with round keys
- * - Cumulative XOR diffusion
- * - Cyclic bitwise rotation
+ * - Cyclic bitwise rotation after EACH permutation (32 rotations per round)
+ * - XOR with round keys (MODE 1)
+ * - Two-layer cumulative XOR diffusion (MODE 1)
  * - Round key generation
- * - Support for Mode 0 (ENHANCED simplified) and Mode 1 (full algorithm)
+ * - Support for Mode 0 (simplified) and Mode 1 (full algorithm)
  * - MPI parallelization for distributed block processing
+ * - Detailed operations table with nested operation descriptions
  * 
- * === MODE 0 ENHANCEMENTS (Preserving Rubik's Cube Analogy) ===
+ * === ALGORITHM STRUCTURE ===
  * 
- * Mode 0 now includes 6 operations per round (vs original 2):
- * 1. Primary Rubik's cube rotation (main face)
- * 2. Secondary Rubik's cube rotation (perpendicular face)
- * 3. Key-dependent byte transposition (layer twisting)
- * 4. Multi-layer diffusion (rotating multiple faces simultaneously)
- * 5. Tertiary Rubik's cube rotation (third axis)
- * 6. Cascading bit rotation (sub-cubes at different speeds)
+ * **MODE 0 (Simplified):**
+ * - For each round:
+ *   - For j=0..31: Apply permutation operation P[RK_r[j] % 127], then cyclic bitwise rotation
+ *   - Total: 32 permutations + 32 rotations per round
  * 
- * All enhancements maintain the Rubik's cube analogy:
- * - Multi-axis rotations = rotating different cube faces
- * - Byte transposition = twisting cube layers
- * - Multi-layer diffusion = simultaneous face rotations
- * - Cascading rotations = rotating sub-cubes independently
+ * **MODE 1 (Full):**
+ * - For each round:
+ *   1. For j=0..31: Apply permutation operation P[RK_r[j] % 127], then cyclic bitwise rotation
+ *   2. XOR with round key
+ *   3. S-box substitution
+ *   4. Two-layer diffusion (forward + backward cumulative XOR)
+ *   - Total: 32 permutations + 32 rotations + 3 additional steps per round
  * 
  * Expected improvements:
- * - Significantly better avalanche effect in Mode 0 (~45-50%)
- * - Maintained speed (all operations are lightweight + cached)
- * - Preserved Rubik's cube conceptual model
- * - Mode 1 unchanged (already optimal)
+ * - Significantly better avalanche effect in Mode 0 (expected ~15-25%)
+ * - Excellent avalanche effect in Mode 1 (expected ~45-50%)
+ * - Enhanced bit mixing through frequent rotations
+ * - Maintained speed with pre-computed operation cache
+ * - Maintained Rubik's cube conceptual model
  * 
  * THREAD SAFETY:
  * - Each MPI process maintains its own cipher instance (no shared state)
@@ -758,40 +759,36 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
         if (cipher->algorithm_mode == MODE_FULL) {
             /* MODE 1: Full algorithm with 5 steps per round */
             
-            /* Step 1: Dynamic permutations - 32 operations per round */
+            /* Step 1: Dynamic permutations with cyclic rotation after each operation (32 operations + 32 rotations) */
             for (int j = 0; j < 32; j++) {
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
                 apply_operation_cached(cipher, ciphertext, idx_j, 0);
-            }
-            
-            /* Step 2: Cyclic bitwise rotation */
-            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
-            if (shift > 0) {
+                
+                /* Cyclic bitwise rotation after each permutation operation */
+                int shift = ((j + round) % 8) + 1; /* Variable shift based on operation index and round */
                 cyclic_bitwise_rotate(ciphertext, cipher->block_size, shift, 0);
             }
             
-            /* Step 3: XOR with round key */
+            /* Step 2: XOR with round key */
             xor_with_key(ciphertext, cipher->round_keys[round], cipher->block_size);
             
-            /* Step 4: S-box substitution */
+            /* Step 3: S-box substitution */
             substitute_bytes(cipher, ciphertext, 0);
             
-            /* Step 5: Two-layer diffusion (forward + backward cumulative XOR) */
+            /* Step 4: Two-layer diffusion (forward + backward cumulative XOR) */
             two_layer_diffusion(ciphertext, cipher->block_size, 0);
         } else {
-            /* MODE 0: Simplified algorithm with 2 steps per round */
+            /* MODE 0: Simplified algorithm with dynamic permutations and rotation after each (32 operations + 32 rotations) */
             
-            /* Step 1: Dynamic permutations - 32 operations per round */
+            /* Step 1: Dynamic permutations with cyclic rotation after each operation */
             for (int j = 0; j < 32; j++) {
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
                 apply_operation_cached(cipher, ciphertext, idx_j, 0);
-            }
-            
-            /* Step 2: Cyclic bitwise rotation */
-            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
-            if (shift > 0) {
+                
+                /* Cyclic bitwise rotation after each permutation operation */
+                int shift = ((j + round) % 8) + 1; /* Variable shift based on operation index and round */
                 cyclic_bitwise_rotate(ciphertext, cipher->block_size, shift, 0);
             }
         }
@@ -805,23 +802,21 @@ void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *
         if (cipher->algorithm_mode == MODE_FULL) {
             /* MODE 1: Full algorithm - reverse order of steps */
             
-            /* Step 5: Inverse two-layer diffusion */
+            /* Step 4: Inverse two-layer diffusion */
             two_layer_diffusion(plaintext, cipher->block_size, 1);
             
-            /* Step 4: Inverse S-box substitution */
+            /* Step 3: Inverse S-box substitution */
             substitute_bytes(cipher, plaintext, 1);
             
-            /* Step 3: XOR with round key (self-inverse) */
+            /* Step 2: XOR with round key (self-inverse) */
             xor_with_key(plaintext, cipher->round_keys[round], cipher->block_size);
             
-            /* Step 2: Inverse cyclic bitwise rotation */
-            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
-            if (shift > 0) {
-                cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
-            }
-            
-            /* Step 1: Inverse dynamic permutations - reverse order */
+            /* Step 1: Inverse dynamic permutations with inverse cyclic rotations - reverse order */
             for (int j = 31; j >= 0; j--) {
+                /* Inverse cyclic bitwise rotation before each inverse permutation */
+                int shift = ((j + round) % 8) + 1; /* Same shift calculation as forward */
+                cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
+                
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
                 apply_operation_cached(cipher, plaintext, idx_j, 1);
@@ -829,14 +824,12 @@ void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *
         } else {
             /* MODE 0: Simplified algorithm - reverse order of steps */
             
-            /* Step 2: Inverse cyclic bitwise rotation */
-            int shift = (cipher->block_size > 1) ? cipher->round_keys[round][1] % 8 : round % 8;
-            if (shift > 0) {
-                cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
-            }
-            
-            /* Step 1: Inverse dynamic permutations - reverse order */
+            /* Step 1: Inverse dynamic permutations with inverse cyclic rotations - reverse order */
             for (int j = 31; j >= 0; j--) {
+                /* Inverse cyclic bitwise rotation before each inverse permutation */
+                int shift = ((j + round) % 8) + 1; /* Same shift calculation as forward */
+                cyclic_bitwise_rotate(plaintext, cipher->block_size, shift, 1);
+                
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
                 apply_operation_cached(cipher, plaintext, idx_j, 1);
@@ -1248,8 +1241,8 @@ static void print_operations_table(WBC1Cipher *cipher) {
     printf("======================================================================\n");
     printf("          ТАБЛИЦА ПЕРЕСТАНОВОК / OPERATIONS TABLE\n");
     printf("======================================================================\n");
-    printf("%-6s %-8s %-8s %-50s %s\n", "Номер", "ASCII", "Hex", "Операция", "Описание");
-    printf("%-6s %-8s %-8s %-50s %s\n", "Number", "Char", "Code", "Operation", "Description");
+    printf("%-6s %-8s %-8s %s\n", "Номер", "ASCII", "Hex", "Полное описание операции");
+    printf("%-6s %-8s %-8s %s\n", "Number", "Char", "Code", "Full Operation Description");
     printf("----------------------------------------------------------------------\n");
     
     for (int i = 0; i < NUM_OPERATIONS; i++) {
@@ -1267,52 +1260,51 @@ static void print_operations_table(WBC1Cipher *cipher) {
         char hex[10];
         snprintf(hex, sizeof(hex), "0x%02X", i);
         
-        /* Operation type and parameters */
-        char operation[51];
-        if (strcmp(op->type, "dynamic") == 0) {
-            if (op->chain_length > 0) {
-                snprintf(operation, sizeof(operation), "Dynamic[%d ops]", op->chain_length);
-            } else {
-                snprintf(operation, sizeof(operation), "Dynamic");
+        /* Print operation header with number, ASCII, and hex */
+        printf("%-6d %-8s %-8s ", i, ascii_char, hex);
+        
+        /* Build detailed operation description */
+        if (strcmp(op->type, "dynamic") == 0 && op->chain_length > 0) {
+            /* Dynamic operation with sub-operations chain */
+            printf("('%s', %d, [", op->type, op->chain_length);
+            
+            /* Print each sub-operation in the chain */
+            for (int j = 0; j < op->chain_length && j < 8; j++) {
+                int sub_idx = op->chain[j];
+                if (sub_idx >= 0 && sub_idx < g_base_ops_count) {
+                    Operation *subop = &g_base_operations[sub_idx];
+                    
+                    if (j > 0) printf(", ");
+                    
+                    /* Print sub-operation as Python tuple */
+                    if (strcmp(subop->type, "dynamic") == 0 && subop->chain_length > 0) {
+                        /* Nested dynamic pattern */
+                        printf("('%s', %d, [...], '%s')", subop->type, subop->chain_length, subop->desc);
+                    } else {
+                        /* Regular sub-operation */
+                        printf("('%s', '%s', '%s', '%s')", 
+                               subop->type, subop->param1, subop->param2, subop->desc);
+                    }
+                }
             }
-        } else if (strcmp(op->type, "face") == 0) {
-            snprintf(operation, sizeof(operation), "Face %s%s", op->param1, op->param2);
-        } else if (strcmp(op->type, "slice") == 0) {
-            snprintf(operation, sizeof(operation), "Slice %s%s", op->param1, op->param2);
-        } else if (strcmp(op->type, "wide") == 0) {
-            snprintf(operation, sizeof(operation), "Wide %s%s", op->param1, op->param2);
-        } else if (strcmp(op->type, "cube") == 0) {
-            snprintf(operation, sizeof(operation), "Cube %s%s", op->param1, op->param2);
-        } else if (strcmp(op->type, "alg") == 0) {
-            snprintf(operation, sizeof(operation), "Alg:%s", op->param1);
-        } else if (strcmp(op->type, "pattern") == 0) {
-            snprintf(operation, sizeof(operation), "Pat:%s", op->param1);
-        } else if (strcmp(op->type, "swap") == 0) {
-            snprintf(operation, sizeof(operation), "Swap ax=%s off=%s", op->param1, op->param2);
-        } else if (strcmp(op->type, "diagflip") == 0) {
-            snprintf(operation, sizeof(operation), "DiagFlip ax=%s", op->param1);
+            
+            printf("], '%s')\n", op->desc);
         } else {
-            snprintf(operation, sizeof(operation), "%s", op->type);
+            /* Simple operation - print as tuple */
+            if (strlen(op->param1) > 0 || strlen(op->param2) > 0) {
+                printf("('%s', '%s', '%s', '%s')\n", 
+                       op->type, op->param1, op->param2, op->desc);
+            } else {
+                printf("('%s', '%s')\n", op->type, op->desc);
+            }
         }
-        
-        /* Description (truncate if too long) */
-        char description[50];
-        if (strlen(op->desc) > 45) {
-            strncpy(description, op->desc, 42);
-            description[42] = '.';
-            description[43] = '.';
-            description[44] = '.';
-            description[45] = '\0';
-        } else {
-            strncpy(description, op->desc, sizeof(description) - 1);
-            description[sizeof(description) - 1] = '\0';
-        }
-        
-        printf("%-6d %-8s %-8s %-50s %s\n", i, ascii_char, hex, operation, description);
     }
     
     printf("======================================================================\n");
     printf("Всего операций / Total operations: %d\n", NUM_OPERATIONS);
+    printf("Базовых операций / Base operations: %d\n", g_base_ops_count);
+    printf("Динамических композиций / Dynamic compositions: %d\n", 
+           NUM_OPERATIONS - g_base_ops_count);
     printf("======================================================================\n\n");
 }
 
