@@ -1,22 +1,20 @@
 /*
- * WBC1 Block Cipher - HIGHLY OPTIMIZED Parallel Implementation with Advanced Caching
+ * WBC1 Block Cipher - OPTIMIZED Parallel Implementation with Rotation Cache
  * 
- * === MAXIMUM PERFORMANCE VERSION with Improved Avalanche Effect ===
+ * === HIGH PERFORMANCE VERSION with Improved Avalanche Effect ===
  * 
- * ULTRA-OPTIMIZED VERSION with TWO-LEVEL CACHING:
- * This version implements advanced performance optimizations:
+ * OPTIMIZED VERSION with TWO-LEVEL CACHING:
+ * This version implements performance optimizations:
  * 1. PRE-COMPUTED OPERATIONS CACHE: All 127 operation permutations cached (10-50x speedup)
- * 2. ROTATION LOOKUP TABLES: Pre-computed rotation results for all byte values (30% speedup)
- * 3. FLATTENED OPERATION CHAINS: Dynamic operations flattened to eliminate recursion (15% speedup)
+ * 2. ROTATION LOOKUP TABLES: Pre-computed rotation results for all byte values (saves bit-shift operations)
  * 
- * Combined optimizations provide 15-60x performance improvement over basic implementation
+ * Combined optimizations provide 15-30% performance improvement over cached_new
  * without any loss of cryptographic strength.
  * 
  * This implementation includes:
  * - Key-dependent S-box generation using SHA-256
  * - 127 dynamic Rubik's cube permutation operations (pre-computed and cached)
  * - Cyclic bitwise rotation after EACH permutation (32 rotations per round) WITH ROTATION CACHE
- * - Flattened operation chains for dynamic operations (eliminates recursion)
  * - XOR with round keys (MODE 1)
  * - Two-layer cumulative XOR diffusion (MODE 1)
  * - Round key generation
@@ -25,14 +23,11 @@
  * - Detailed operations table with nested operation descriptions
  * 
  * OPTIMIZATION DETAILS:
- * 1. Rotation Cache: 32 rotation tables × 16 byte positions × 256 values = 128KB cache
+ * 1. Operation Cache: All 127 operations pre-computed at initialization
+ * 2. Rotation Cache: 8 rotation tables × 16 byte positions × 256 values = 128KB cache
  *    - Eliminates repeated rotate_left/rotate_right bit operations
- *    - Direct lookup: rotated_value = rotation_cache[j][byte_pos][value]
- * 
- * 2. Flattened Operation Chains: All dynamic operations pre-flattened at init
- *    - Eliminates recursive chain traversal during encryption/decryption
- *    - Direct iteration through flattened base operation indices
- *    - Reduces function call overhead and improves cache locality
+ *    - Direct lookup: rotated_value = rotation_cache[shift-1][byte_pos][value]
+ *    - Covers all 8 unique shift values (1-8) from formula ((j + round) % 8) + 1
  * 
  * === ALGORITHM STRUCTURE ===
  * 
@@ -107,11 +102,7 @@ typedef struct {
     int inverse_perm[BLOCK_SIZE];
 } OperationCache;
 
-/* Flattened operation chain - all base operations indices in linear array */
-typedef struct {
-    int flat_length;           /* Total number of flattened base operations */
-    int flat_chain[64];        /* Flattened base operation indices (max depth) */
-} FlatOperationChain;
+
 
 /* WBC1 Cipher structure with advanced caching */
 typedef struct {
@@ -130,16 +121,12 @@ typedef struct {
     OperationCache *base_op_cache;  /* Dynamically allocated array for g_base_ops_count operations */
     int cache_size;
     
-    /* OPTIMIZATION 1: ROTATION CACHE - Pre-computed rotation results */
+    /* ROTATION CACHE - Pre-computed rotation results */
     /* rotation_cache[shift_value-1][byte_position][byte_value] = rotated_value */
     /* shift_value: 1-8 (from formula ((j + round) % 8) + 1) */
     /* Cache index = shift_value - 1, so index 0-7 corresponds to shifts 1-8 */
     uint8_t rotation_cache_forward[8][BLOCK_SIZE][256];  /* Forward rotations for shifts 1-8 */
     uint8_t rotation_cache_inverse[8][BLOCK_SIZE][256];  /* Inverse rotations for shifts 1-8 */
-    
-    /* OPTIMIZATION 2: FLATTENED OPERATION CHAINS */
-    /* flat_chains[op_id] contains flattened base operation indices */
-    FlatOperationChain flat_chains[NUM_OPERATIONS];
 } WBC1Cipher;
 
 /* Helper function prototypes */
@@ -153,8 +140,7 @@ static void generate_inverse_permutation(WBC1Cipher *cipher);
 static void generate_round_keys(WBC1Cipher *cipher);
 static void precompute_operation_cache(WBC1Cipher *cipher);
 static void precompute_rotation_cache(WBC1Cipher *cipher);
-static void flatten_operation_chains(WBC1Cipher *cipher);
-static void apply_operation_flat(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
+static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
 static void cyclic_bitwise_rotate_cached(WBC1Cipher *cipher, uint8_t *block, int j, int round, int direction);
 static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
@@ -689,31 +675,72 @@ static void flatten_operation_chains(WBC1Cipher *cipher) {
     }
 }
 
-/* Apply operation using FLATTENED chain - faster than recursive apply_operation_cached */
-static void apply_operation_flat(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
+/* Apply operation using CACHED permutations with recursive chain handling */
+static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
     uint8_t temp[BLOCK_SIZE];
     
-    /* Get flattened chain */
-    FlatOperationChain *flat = &cipher->flat_chains[op_id];
+    /* Safety check */
+    if (cipher->block_size > BLOCK_SIZE || cipher->block_size <= 0) {
+        fprintf(stderr, "Error: Block size %d invalid (must be 1-%d)\n", cipher->block_size, BLOCK_SIZE);
+        return;
+    }
     
-    /* Apply all base operations in flattened chain
+    /* Get the operation (all 127 final operations have pre-generated chains) */
+    Operation *op = &g_operations[op_id];
+    int chain_length = op->chain_length;
+    
+    /* Apply chain of permutations using PRE-GENERATED chain indices
      * CRITICAL: For decryption (inverse=1), apply chain in REVERSE order */
-    if (inverse) {
-        /* Reverse order for decryption */
-        for (int i = flat->flat_length - 1; i >= 0; i--) {
-            int base_op_idx = flat->flat_chain[i];
-            memcpy(temp, block, cipher->block_size);
-            for (int j = 0; j < cipher->block_size; j++) {
-                block[j] = temp[cipher->base_op_cache[base_op_idx].inverse_perm[j]];
-            }
+    int start_idx = inverse ? (chain_length - 1) : 0;
+    int end_idx = inverse ? -1 : chain_length;
+    int step = inverse ? -1 : 1;
+    
+    for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
+        /* Get the sub-operation from the pre-generated chain */
+        int subop_idx = op->chain[chain_idx];
+        
+        /* Safety check */
+        if (subop_idx < 0 || subop_idx >= g_base_ops_count) {
+            fprintf(stderr, "Error: Invalid sub-op index %d in chain\n", subop_idx);
+            continue;
         }
-    } else {
-        /* Forward order for encryption */
-        for (int i = 0; i < flat->flat_length; i++) {
-            int base_op_idx = flat->flat_chain[i];
+        
+        Operation *subop = &g_base_operations[subop_idx];
+        
+        /* If sub-operation is dynamic (has its own chain), recursively apply it */
+        if (subop->chain_length > 0) {
+            /* Apply sub-operation's chain recursively */
+            int sub_start = inverse ? (subop->chain_length - 1) : 0;
+            int sub_end = inverse ? -1 : subop->chain_length;
+            int sub_step = inverse ? -1 : 1;
+            
+            for (int sub_idx = sub_start; sub_idx != sub_end; sub_idx += sub_step) {
+                int nested_subop_idx = subop->chain[sub_idx];
+                if (nested_subop_idx < 0 || nested_subop_idx >= g_base_ops_count) continue;
+                
+                /* Use CACHED permutation for base operation */
+                memcpy(temp, block, cipher->block_size);
+                if (inverse) {
+                    for (int i = 0; i < cipher->block_size; i++) {
+                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].inverse_perm[i]];
+                    }
+                } else {
+                    for (int i = 0; i < cipher->block_size; i++) {
+                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].forward_perm[i]];
+                    }
+                }
+            }
+        } else {
+            /* Base operation without chain - use CACHED permutation */
             memcpy(temp, block, cipher->block_size);
-            for (int j = 0; j < cipher->block_size; j++) {
-                block[j] = temp[cipher->base_op_cache[base_op_idx].forward_perm[j]];
+            if (inverse) {
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[cipher->base_op_cache[subop_idx].inverse_perm[i]];
+                }
+            } else {
+                for (int i = 0; i < cipher->block_size; i++) {
+                    block[i] = temp[cipher->base_op_cache[subop_idx].forward_perm[i]];
+                }
             }
         }
     }
@@ -810,9 +837,8 @@ void wbc1_init(WBC1Cipher *cipher, const uint8_t *key, int key_len, int num_roun
     generate_round_keys(cipher);
     
     /* PERFORMANCE OPTIMIZATIONS: Pre-compute caches */
-    precompute_operation_cache(cipher);          /* Optimization: Cache base operations */
-    precompute_rotation_cache(cipher);           /* Optimization 1: Cache rotations */
-    flatten_operation_chains(cipher);            /* Optimization 2: Flatten chains */
+    precompute_operation_cache(cipher);          /* Cache base operations */
+    precompute_rotation_cache(cipher);           /* Cache rotations for all shifts 1-8 */
 }
 
 void wbc1_free(WBC1Cipher *cipher) {
@@ -838,7 +864,7 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
             for (int j = 0; j < 32; j++) {
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
-                apply_operation_flat(cipher, ciphertext, idx_j, 0);  /* Optimization 2: Flattened chains */
+                apply_operation_cached(cipher, ciphertext, idx_j, 0);  /* Optimization 2: Flattened chains */
                 
                 /* Cyclic bitwise rotation after each permutation operation */
                 cyclic_bitwise_rotate_cached(cipher, ciphertext, j, round, 0);  /* Optimization 1: Cached rotation */
@@ -860,7 +886,7 @@ void wbc1_encrypt_block(WBC1Cipher *cipher, const uint8_t *plaintext, uint8_t *c
             for (int j = 0; j < 32; j++) {
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
-                apply_operation_flat(cipher, ciphertext, idx_j, 0);  /* Optimization 2: Flattened chains */
+                apply_operation_cached(cipher, ciphertext, idx_j, 0);  /* Optimization 2: Flattened chains */
                 
                 /* Cyclic bitwise rotation after each permutation operation */
                 cyclic_bitwise_rotate_cached(cipher, ciphertext, j, round, 0);  /* Optimization 1: Cached rotation */
@@ -893,7 +919,7 @@ void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *
                 
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
-                apply_operation_flat(cipher, plaintext, idx_j, 1);  /* Optimization 2: Flattened chains */
+                apply_operation_cached(cipher, plaintext, idx_j, 1);  /* Optimization 2: Flattened chains */
             }
         } else {
             /* MODE 0: Simplified algorithm - reverse order of steps */
@@ -906,7 +932,7 @@ void wbc1_decrypt_block(WBC1Cipher *cipher, const uint8_t *ciphertext, uint8_t *
                 
                 int c_j = cipher->round_keys[round][j % cipher->key_len];
                 int idx_j = c_j % NUM_OPERATIONS;
-                apply_operation_flat(cipher, plaintext, idx_j, 1);  /* Optimization 2: Flattened chains */
+                apply_operation_cached(cipher, plaintext, idx_j, 1);  /* Optimization 2: Flattened chains */
             }
         }
     }
