@@ -24,6 +24,7 @@ SRC_BASIC = wbc1_parallel.c
 SRC_CACHED = wbc1_parallel_cached.c
 SRC_BASIC_NEW = wbc1_parallel_new.c
 SRC_CACHED_NEW = wbc1_parallel_cached_new.c
+SRC_CACHED_OPTI = wbc1_parallel_cached_opti.c
 SRC_MINIMAL = wbc1_parallel_minimal.c
 
 # Output binaries
@@ -31,6 +32,7 @@ BIN_BASIC = wbc1_parallel
 BIN_CACHED = wbc1_parallel_cached
 BIN_BASIC_NEW = wbc1_parallel_new
 BIN_CACHED_NEW = wbc1_parallel_cached_new
+BIN_CACHED_OPTI = wbc1_parallel_cached_opti
 BIN_MINIMAL = wbc1_parallel_minimal
 
 # Default target
@@ -72,9 +74,15 @@ cached-new: $(BIN_CACHED_NEW)
 $(BIN_CACHED_NEW): $(SRC_CACHED_NEW)
 	$(MPICC) $(CFLAGS) -o $(BIN_CACHED_NEW) $(SRC_CACHED_NEW) $(LDFLAGS)
 
+# Build ultra-optimized cached version (Advanced optimizations)
+cached-opti: $(BIN_CACHED_OPTI)
+
+$(BIN_CACHED_OPTI): $(SRC_CACHED_OPTI)
+	$(MPICC) $(CFLAGS) -o $(BIN_CACHED_OPTI) $(SRC_CACHED_OPTI) $(LDFLAGS)
+
 # Clean build artifacts
 clean:
-	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_MINIMAL) *.o
+	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_CACHED_OPTI) $(BIN_MINIMAL) *.o
 
 # Run tests
 test: test-basic test-cached
