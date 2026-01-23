@@ -153,10 +153,8 @@ static void generate_round_keys(WBC1Cipher *cipher);
 static void precompute_operation_cache(WBC1Cipher *cipher);
 static void precompute_rotation_cache(WBC1Cipher *cipher);
 static void flatten_operation_chains(WBC1Cipher *cipher);
-static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
 static void apply_operation_flat(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse);
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse);
-static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction);
 static void cyclic_bitwise_rotate_cached(WBC1Cipher *cipher, uint8_t *block, int j, int round, int direction);
 static void xor_with_key(uint8_t *block, const uint8_t *key, int size);
 static void two_layer_diffusion(uint8_t *block, int size, int inverse);
@@ -651,80 +649,6 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
     }
 }
 
-/* 
- * Apply dynamic Rubik's cube permutation operation using CACHED base operation permutations
- * This eliminates SHA-256 computation and MT19937 shuffle for base operations
- */
-static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
-    uint8_t temp[BLOCK_SIZE];
-    
-    /* Safety check */
-    if (cipher->block_size > BLOCK_SIZE || cipher->block_size <= 0) {
-        fprintf(stderr, "Error: Block size %d invalid (must be 1-%d)\n", cipher->block_size, BLOCK_SIZE);
-        return;
-    }
-    
-    /* Get the operation (all 127 final operations have pre-generated chains) */
-    Operation *op = &g_operations[op_id];
-    int chain_length = op->chain_length;
-    
-    /* Apply chain of permutations using PRE-GENERATED chain indices
-     * CRITICAL: For decryption (inverse=1), apply chain in REVERSE order */
-    int start_idx = inverse ? (chain_length - 1) : 0;
-    int end_idx = inverse ? -1 : chain_length;
-    int step = inverse ? -1 : 1;
-    
-    for (int chain_idx = start_idx; chain_idx != end_idx; chain_idx += step) {
-        /* Get the sub-operation from the pre-generated chain */
-        int subop_idx = op->chain[chain_idx];
-        
-        /* Safety check */
-        if (subop_idx < 0 || subop_idx >= g_base_ops_count) {
-            fprintf(stderr, "Error: Invalid sub-op index %d in chain\n", subop_idx);
-            continue;
-        }
-        
-        Operation *subop = &g_base_operations[subop_idx];
-        
-        /* If sub-operation is dynamic (has its own chain), recursively apply it */
-        if (subop->chain_length > 0) {
-            /* Apply sub-operation's chain recursively */
-            int sub_start = inverse ? (subop->chain_length - 1) : 0;
-            int sub_end = inverse ? -1 : subop->chain_length;
-            int sub_step = inverse ? -1 : 1;
-            
-            for (int sub_idx = sub_start; sub_idx != sub_end; sub_idx += sub_step) {
-                int nested_subop_idx = subop->chain[sub_idx];
-                if (nested_subop_idx < 0 || nested_subop_idx >= g_base_ops_count) continue;
-                
-                /* Use CACHED permutation for base operation */
-                memcpy(temp, block, cipher->block_size);
-                if (inverse) {
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].inverse_perm[i]];
-                    }
-                } else {
-                    for (int i = 0; i < cipher->block_size; i++) {
-                        block[i] = temp[cipher->base_op_cache[nested_subop_idx].forward_perm[i]];
-                    }
-                }
-            }
-        } else {
-            /* Base operation without chain - use CACHED permutation */
-            memcpy(temp, block, cipher->block_size);
-            if (inverse) {
-                for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[cipher->base_op_cache[subop_idx].inverse_perm[i]];
-                }
-            } else {
-                for (int i = 0; i < cipher->block_size; i++) {
-                    block[i] = temp[cipher->base_op_cache[subop_idx].forward_perm[i]];
-                }
-            }
-        }
-    }
-}
-
 /* ===== OPTIMIZATION 2: Flatten operation chains ===== */
 static void flatten_operation_chains(WBC1Cipher *cipher) {
     /* Flatten all dynamic operation chains into linear arrays of base operation indices
@@ -798,14 +722,6 @@ static void apply_operation_flat(WBC1Cipher *cipher, uint8_t *block, int op_id, 
 static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse) {
     for (int i = 0; i < cipher->block_size; i++) {
         block[i] = inverse ? cipher->inv_sbox[block[i]] : cipher->sbox[block[i]];
-    }
-}
-
-/* Cyclic bitwise rotation on all bytes */
-static void cyclic_bitwise_rotate(uint8_t *block, int size, int shift, int direction) {
-    shift = shift % 8;
-    for (int i = 0; i < size; i++) {
-        block[i] = (direction == 0) ? rotate_right(block[i], shift) : rotate_left(block[i], shift);
     }
 }
 
