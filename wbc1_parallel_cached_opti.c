@@ -131,10 +131,11 @@ typedef struct {
     int cache_size;
     
     /* OPTIMIZATION 1: ROTATION CACHE - Pre-computed rotation results */
-    /* rotation_cache[shift_index][byte_position][byte_value] = rotated_value */
-    /* shift_index: 0-31 for ((j + round) % 8) + 1 where j=0..31, round=0..15 */
-    uint8_t rotation_cache_forward[32][BLOCK_SIZE][256];  /* Forward rotations */
-    uint8_t rotation_cache_inverse[32][BLOCK_SIZE][256];  /* Inverse rotations */
+    /* rotation_cache[shift_value-1][byte_position][byte_value] = rotated_value */
+    /* shift_value: 1-8 (from formula ((j + round) % 8) + 1) */
+    /* Cache index = shift_value - 1, so index 0-7 corresponds to shifts 1-8 */
+    uint8_t rotation_cache_forward[8][BLOCK_SIZE][256];  /* Forward rotations for shifts 1-8 */
+    uint8_t rotation_cache_inverse[8][BLOCK_SIZE][256];  /* Inverse rotations for shifts 1-8 */
     
     /* OPTIMIZATION 2: FLATTENED OPERATION CHAINS */
     /* flat_chains[op_id] contains flattened base operation indices */
@@ -572,24 +573,23 @@ static void precompute_rotation_cache(WBC1Cipher *cipher) {
     /* Pre-compute all rotation results for all byte values with all shift amounts
      * This eliminates repeated rotate_left/rotate_right bit operations
      * 
-     * rotation_cache[j][byte_pos][value] = rotated value
-     * where j = 0..31 (operation index in round)
+     * rotation_cache[shift-1][byte_pos][value] = rotated value
+     * where shift = 1..8 (from formula ((j + round) % 8) + 1)
      * 
-     * Shift calculation: shift = ((j + round) % 8) + 1
-     * We cache rotations for j values, round effect is computed dynamically
+     * We cache 8 unique shift values (1-8) instead of 32 j+round combinations
+     * This provides perfect cache coverage with minimal memory
      */
     
-    for (int j = 0; j < 32; j++) {
-        /* Calculate shift for this j at round 0 as baseline */
-        int shift = ((j + 0) % 8) + 1;
+    for (int shift = 1; shift <= 8; shift++) {
+        int cache_idx = shift - 1;  /* Map shift 1-8 to index 0-7 */
         
         for (int byte_pos = 0; byte_pos < BLOCK_SIZE; byte_pos++) {
             for (int value = 0; value < 256; value++) {
                 /* Forward rotation (left shift) */
-                cipher->rotation_cache_forward[j][byte_pos][value] = rotate_left((uint8_t)value, shift);
+                cipher->rotation_cache_forward[cache_idx][byte_pos][value] = rotate_left((uint8_t)value, shift);
                 
                 /* Inverse rotation (right shift) */
-                cipher->rotation_cache_inverse[j][byte_pos][value] = rotate_right((uint8_t)value, shift);
+                cipher->rotation_cache_inverse[cache_idx][byte_pos][value] = rotate_right((uint8_t)value, shift);
             }
         }
     }
@@ -728,11 +728,12 @@ static void substitute_bytes(WBC1Cipher *cipher, uint8_t *block, int inverse) {
 /* OPTIMIZED: Cyclic bitwise rotation using pre-computed cache */
 static void cyclic_bitwise_rotate_cached(WBC1Cipher *cipher, uint8_t *block, int j, int round, int direction) {
     /* Use rotation cache for faster lookups */
-    /* Cache index is based on j value (0-31) */
     /* Actual shift depends on both j and round: ((j + round) % 8) + 1 */
+    /* Cache stores shifts 1-8 at indices 0-7 */
     
-    /* Calculate the cache index - we need to adjust for round effect */
-    int cache_idx = (j + round) % 32;  /* Cycle through our 32 cached values */
+    /* Calculate the actual shift value */
+    int shift = ((j + round) % 8) + 1;  /* Shift is 1-8 */
+    int cache_idx = shift - 1;           /* Map to cache index 0-7 */
     
     if (direction == 0) {
         /* Forward (left) rotation */
