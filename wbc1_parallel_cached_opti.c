@@ -635,46 +635,6 @@ static void precompute_operation_cache(WBC1Cipher *cipher) {
     }
 }
 
-/* ===== OPTIMIZATION 2: Flatten operation chains ===== */
-static void flatten_operation_chains(WBC1Cipher *cipher) {
-    /* Flatten all dynamic operation chains into linear arrays of base operation indices
-     * This eliminates recursive traversal during encryption/decryption */
-    
-    for (int op_id = 0; op_id < NUM_OPERATIONS; op_id++) {
-        Operation *op = &g_operations[op_id];
-        FlatOperationChain *flat = &cipher->flat_chains[op_id];
-        flat->flat_length = 0;
-        
-        /* Traverse the operation chain and flatten it */
-        for (int chain_idx = 0; chain_idx < op->chain_length; chain_idx++) {
-            int subop_idx = op->chain[chain_idx];
-            
-            if (subop_idx < 0 || subop_idx >= g_base_ops_count) {
-                continue;  /* Skip invalid indices */
-            }
-            
-            Operation *subop = &g_base_operations[subop_idx];
-            
-            /* If sub-operation has its own chain, flatten it recursively */
-            if (subop->chain_length > 0) {
-                for (int sub_idx = 0; sub_idx < subop->chain_length; sub_idx++) {
-                    int nested_subop_idx = subop->chain[sub_idx];
-                    if (nested_subop_idx >= 0 && nested_subop_idx < g_base_ops_count) {
-                        if (flat->flat_length < 64) {
-                            flat->flat_chain[flat->flat_length++] = nested_subop_idx;
-                        }
-                    }
-                }
-            } else {
-                /* Base operation - add directly to flattened chain */
-                if (flat->flat_length < 64) {
-                    flat->flat_chain[flat->flat_length++] = subop_idx;
-                }
-            }
-        }
-    }
-}
-
 /* Apply operation using CACHED permutations with recursive chain handling */
 static void apply_operation_cached(WBC1Cipher *cipher, uint8_t *block, int op_id, int inverse) {
     uint8_t temp[BLOCK_SIZE];
