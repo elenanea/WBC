@@ -209,3 +209,26 @@ help:
 	@echo ""
 
 .PHONY: all basic cached clean test test-basic test-cached benchmark help
+
+
+# Build original algorithm version (bit-by-bit key processing)
+SRC_ORIGINAL = wbc1_original_parallel.c
+BIN_ORIGINAL = wbc1_original_parallel
+
+original: $(BIN_ORIGINAL)
+
+$(BIN_ORIGINAL): $(SRC_ORIGINAL)
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Test original version
+test-original: $(BIN_ORIGINAL)
+	@echo "========================================"
+	@echo "Testing ORIGINAL Algorithm Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Text encryption with 32-bit blocks"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL) 0 256 0 32
+	@echo ""
+	@echo "Test 2: Text encryption with 128-bit blocks"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL) 0 256 0 128
+	@echo ""
