@@ -642,7 +642,7 @@ int main(int argc, char *argv[]) {
         if (argc >= 7 && mode == 1) {
             data_kb = atoi(argv[6]);
             if (data_kb < 1) data_kb = 1;
-            if (data_kb > 10000) data_kb = 10000;  /* Max 10MB */
+            if (data_kb > 100000) data_kb = 100000;  /* Max 100MB */
         }
         
         if (rank == 0) {
@@ -735,7 +735,7 @@ int main(int argc, char *argv[]) {
         if (argc >= 7) {
             data_kb = atoi(argv[6]);
             if (data_kb < 1) data_kb = 1;
-            if (data_kb > 1000) data_kb = 1000;
+            if (data_kb > 100000) data_kb = 100000;  /* Max 100MB */
         }
         
         if (rank == 0) {
