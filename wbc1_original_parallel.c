@@ -592,8 +592,13 @@ int main(int argc, char *argv[]) {
             printf("  key_size: key size in bits (128, 192, 256)\n");
             printf("  key_source: 0=random, 1=from file\n");
             printf("  block_size_bits: block size in bits (32, 64, 128, 512)\n");
-            printf("  mode: (for task 1) 0=simple, 1=full\n");
-            printf("  data_size_kb: (for task 1) amount of data in KB\n");
+            printf("  mode: (for task 0) 0=use demo text, 1=generate random data\n");
+            printf("         (for task 1) 0=simple, 1=full\n");
+            printf("  data_size_kb: amount of data in KB (for task 0 with mode=1, or task 1)\n");
+            printf("\nExamples:\n");
+            printf("  %s 0 256 0 128          # Encrypt demo text\n", argv[0]);
+            printf("  %s 0 256 0 128 1 10     # Encrypt 10KB random data\n", argv[0]);
+            printf("  %s 1 256 0 128 1 100    # Statistical tests with 100KB data\n", argv[0]);
         }
         MPI_Finalize();
         return 1;
@@ -629,31 +634,61 @@ int main(int argc, char *argv[]) {
     
     if (task == 0) {
         /* Text encryption/decryption */
+        int mode = 0;  /* 0 = demo text, 1 = random data */
+        int data_kb = 1;
+        if (argc >= 6) {
+            mode = atoi(argv[5]);
+        }
+        if (argc >= 7 && mode == 1) {
+            data_kb = atoi(argv[6]);
+            if (data_kb < 1) data_kb = 1;
+            if (data_kb > 10000) data_kb = 10000;  /* Max 10MB */
+        }
+        
         if (rank == 0) {
-            const char *demo_text = "Це тестове повідомлення для демонстрації шифрування оригінальним алгоритмом WBC1.";
-            int text_len = strlen(demo_text);
+            uint8_t *plaintext = NULL;
+            int text_len = 0;
             
-            printf("\n========================================\n");
-            printf("WBC1 Original Algorithm - Text Encryption Demo\n");
-            printf("========================================\n");
+            if (mode == 0) {
+                /* Use demo text */
+                const char *demo_text = "Це тестове повідомлення для демонстрації шифрування оригінальним алгоритмом WBC1.";
+                text_len = strlen(demo_text);
+                plaintext = (uint8_t *)malloc(text_len);
+                memcpy(plaintext, demo_text, text_len);
+                
+                printf("\n========================================\n");
+                printf("WBC1 Original Algorithm - Text Encryption Demo\n");
+                printf("========================================\n");
+                printf("Mode: Demo text\n");
+                printf("Original text: %s\n", demo_text);
+            } else {
+                /* Generate random data */
+                text_len = data_kb * 1024;
+                plaintext = generate_random_bytes(text_len);
+                
+                printf("\n========================================\n");
+                printf("WBC1 Original Algorithm - Random Data Encryption\n");
+                printf("========================================\n");
+                printf("Mode: Random data\n");
+                printf("Data size: %d KB (%d bytes)\n", data_kb, text_len);
+                printf("First 64 bytes of plaintext:\n");
+                print_hex(plaintext, text_len < 64 ? text_len : 64);
+            }
+            
             printf("Block size: %d bits (%d bytes)\n", block_size_bits, block_size_bits / 8);
             printf("Key size: %d bits\n", key_size);
             printf("Cube dimension: %d×%d×%d\n", cipher.cube_d, cipher.cube_d, cipher.cube_d);
             printf("Key bits processed: %d\n", cipher.key_len_bits);
-            printf("\nOriginal text: %s\n", demo_text);
             
             uint8_t *ciphertext = NULL;
             int ciphertext_len = 0;
             
             double start_time = MPI_Wtime();
-            parallel_original_encrypt(&cipher, (const uint8_t *)demo_text, text_len, &ciphertext, &ciphertext_len);
+            parallel_original_encrypt(&cipher, plaintext, text_len, &ciphertext, &ciphertext_len);
             double encrypt_time = MPI_Wtime() - start_time;
             
             printf("\nEncrypted (%d bytes):\n", ciphertext_len);
-            for (int i = 0; i < ciphertext_len && i < 64; i++) {
-                printf("%02x", ciphertext[i]);
-                if ((i + 1) % 32 == 0) printf("\n");
-            }
+            print_hex(ciphertext, ciphertext_len < 64 ? ciphertext_len : 64);
             if (ciphertext_len > 64) printf("...\n");
             
             uint8_t *decrypted = NULL;
@@ -663,20 +698,32 @@ int main(int argc, char *argv[]) {
             parallel_original_decrypt(&cipher, ciphertext, ciphertext_len, &decrypted, &decrypted_len);
             double decrypt_time = MPI_Wtime() - start_time;
             
-            printf("\nDecrypted text: %.*s\n", decrypted_len, decrypted);
-            printf("\nEncryption time: %.6f seconds\n", encrypt_time);
-            printf("Decryption time: %.6f seconds\n", decrypt_time);
-            
-            /* Verify */
-            if (decrypted_len == text_len && memcmp(demo_text, decrypted, text_len) == 0) {
-                printf("✓ Success: Decrypted text matches original!\n");
+            if (mode == 0) {
+                printf("\nDecrypted text: %.*s\n", decrypted_len, decrypted);
             } else {
-                printf("✗ Error: Decrypted text does not match original!\n");
+                printf("\nDecrypted (%d bytes), first 64 bytes:\n", decrypted_len);
+                print_hex(decrypted, decrypted_len < 64 ? decrypted_len : 64);
             }
             
+            printf("\nEncryption time: %.6f seconds\n", encrypt_time);
+            printf("Decryption time: %.6f seconds\n", decrypt_time);
+            if (text_len > 0) {
+                double throughput_mb = (text_len / (1024.0 * 1024.0)) / encrypt_time;
+                printf("Throughput: %.2f MB/s\n", throughput_mb);
+            }
+            
+            /* Verify */
+            if (decrypted_len == text_len && memcmp(plaintext, decrypted, text_len) == 0) {
+                printf("✓ Success: Decrypted data matches original! / Успех: Расшифрованные данные совпадают!\n");
+            } else {
+                printf("✗ Error: Decrypted data does not match original! / Ошибка: Несовпадение данных!\n");
+            }
+            
+            free(plaintext);
             free(ciphertext);
             free(decrypted);
         } else {
+            /* Non-root processes participate in parallel encryption/decryption */
             uint8_t *dummy_cipher = NULL;
             int dummy_len = 0;
             parallel_original_encrypt(&cipher, NULL, 0, &dummy_cipher, &dummy_len);
