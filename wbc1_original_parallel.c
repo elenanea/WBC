@@ -367,6 +367,216 @@ void parallel_original_decrypt(WBC1OriginalCipher *cipher, const uint8_t *cipher
     free(my_plaintext);
 }
 
+/* ========================================
+ * Statistical Test Functions
+ * ======================================== */
+
+/* Generate random bytes for testing */
+static uint8_t* generate_random_bytes(int size) {
+    uint8_t *data = (uint8_t *)malloc(size);
+    srand(time(NULL));
+    for (int i = 0; i < size; i++) {
+        data[i] = rand() % 256;
+    }
+    return data;
+}
+
+/* Shannon Entropy calculation */
+static double shannon_entropy(const uint8_t *data, int len) {
+    int freq[256] = {0};
+    for (int i = 0; i < len; i++) {
+        freq[data[i]]++;
+    }
+    
+    double entropy = 0.0;
+    for (int i = 0; i < 256; i++) {
+        if (freq[i] > 0) {
+            double p = (double)freq[i] / len;
+            entropy -= p * log2(p);
+        }
+    }
+    return entropy;
+}
+
+/* Frequency test (Chi-square) */
+static void frequency_test(const uint8_t *data, int len, double *mean, double *std, double *chi_square) {
+    int freq[256] = {0};
+    for (int i = 0; i < len; i++) {
+        freq[data[i]]++;
+    }
+    
+    /* Calculate mean */
+    double sum = 0.0;
+    for (int i = 0; i < 256; i++) {
+        sum += freq[i];
+    }
+    *mean = sum / 256.0;
+    
+    /* Calculate standard deviation */
+    double sum_sq = 0.0;
+    for (int i = 0; i < 256; i++) {
+        double diff = freq[i] - *mean;
+        sum_sq += diff * diff;
+    }
+    *std = sqrt(sum_sq / 256.0);
+    
+    /* Calculate chi-square */
+    double expected = len / 256.0;
+    *chi_square = 0.0;
+    for (int i = 0; i < 256; i++) {
+        double diff = freq[i] - expected;
+        *chi_square += (diff * diff) / expected;
+    }
+}
+
+/* Avalanche effect test */
+static void avalanche_test(WBC1OriginalCipher *cipher, int num_tests, double *results) {
+    double total_percent = 0.0;
+    double min_percent = 100.0;
+    double max_percent = 0.0;
+    
+    int block_size = cipher->block_size_bytes;
+    
+    for (int test = 0; test < num_tests; test++) {
+        /* Generate random plaintext */
+        uint8_t *plaintext1 = generate_random_bytes(block_size);
+        uint8_t *plaintext2 = (uint8_t *)malloc(block_size);
+        memcpy(plaintext2, plaintext1, block_size);
+        
+        /* Flip one random bit */
+        int flip_byte = rand() % block_size;
+        int flip_bit = rand() % 8;
+        plaintext2[flip_byte] ^= (1 << flip_bit);
+        
+        /* Encrypt both */
+        uint8_t *cipher1 = (uint8_t *)malloc(block_size);
+        uint8_t *cipher2 = (uint8_t *)malloc(block_size);
+        
+        wbc1_original_encrypt_block(cipher, plaintext1, cipher1);
+        wbc1_original_encrypt_block(cipher, plaintext2, cipher2);
+        
+        /* Count differing bits */
+        int diff_bits = 0;
+        for (int i = 0; i < block_size; i++) {
+            uint8_t xor_val = cipher1[i] ^ cipher2[i];
+            for (int b = 0; b < 8; b++) {
+                if (xor_val & (1 << b)) diff_bits++;
+            }
+        }
+        
+        double percent = (100.0 * diff_bits) / (block_size * 8);
+        total_percent += percent;
+        if (percent < min_percent) min_percent = percent;
+        if (percent > max_percent) max_percent = percent;
+        
+        free(plaintext1);
+        free(plaintext2);
+        free(cipher1);
+        free(cipher2);
+    }
+    
+    results[0] = total_percent / num_tests;  /* Average */
+    results[1] = min_percent;
+    results[2] = max_percent;
+}
+
+/* Correlation test */
+static double correlation_test(const uint8_t *data1, const uint8_t *data2, int len) {
+    double mean1 = 0.0, mean2 = 0.0;
+    for (int i = 0; i < len; i++) {
+        mean1 += data1[i];
+        mean2 += data2[i];
+    }
+    mean1 /= len;
+    mean2 /= len;
+    
+    double cov = 0.0, var1 = 0.0, var2 = 0.0;
+    for (int i = 0; i < len; i++) {
+        double diff1 = data1[i] - mean1;
+        double diff2 = data2[i] - mean2;
+        cov += diff1 * diff2;
+        var1 += diff1 * diff1;
+        var2 += diff2 * diff2;
+    }
+    
+    if (var1 == 0.0 || var2 == 0.0) return 0.0;
+    return cov / sqrt(var1 * var2);
+}
+
+/* Differential test (key sensitivity) */
+static void differential_test(WBC1OriginalCipher *cipher, int num_tests, double *results) {
+    double total_percent = 0.0;
+    double min_percent = 100.0;
+    double max_percent = 0.0;
+    
+    int block_size = cipher->block_size_bytes;
+    uint8_t *plaintext = generate_random_bytes(block_size);
+    
+    for (int test = 0; test < num_tests; test++) {
+        /* Encrypt with original key */
+        uint8_t *cipher1 = (uint8_t *)malloc(block_size);
+        wbc1_original_encrypt_block(cipher, plaintext, cipher1);
+        
+        /* Modify one bit in key */
+        int flip_byte = rand() % cipher->key_len_bytes;
+        int flip_bit = rand() % 8;
+        cipher->key[flip_byte] ^= (1 << flip_bit);
+        
+        /* Encrypt with modified key */
+        uint8_t *cipher2 = (uint8_t *)malloc(block_size);
+        wbc1_original_encrypt_block(cipher, plaintext, cipher2);
+        
+        /* Restore key */
+        cipher->key[flip_byte] ^= (1 << flip_bit);
+        
+        /* Count differing bits */
+        int diff_bits = 0;
+        for (int i = 0; i < block_size; i++) {
+            uint8_t xor_val = cipher1[i] ^ cipher2[i];
+            for (int b = 0; b < 8; b++) {
+                if (xor_val & (1 << b)) diff_bits++;
+            }
+        }
+        
+        double percent = (100.0 * diff_bits) / (block_size * 8);
+        total_percent += percent;
+        if (percent < min_percent) min_percent = percent;
+        if (percent > max_percent) max_percent = percent;
+        
+        free(cipher1);
+        free(cipher2);
+    }
+    
+    results[0] = total_percent / num_tests;  /* Average */
+    results[1] = min_percent;
+    results[2] = max_percent;
+    free(plaintext);
+}
+
+/* Print hex data */
+static void print_hex(const uint8_t *data, int len, int max_bytes) {
+    for (int i = 0; i < len && i < max_bytes; i++) {
+        printf("%02x", data[i]);
+        if ((i + 1) % 32 == 0) printf("\n");
+    }
+    if (len > max_bytes) printf("...\n");
+    else if (len % 32 != 0) printf("\n");
+}
+
+/* Print operations table */
+static void print_operations_table(WBC1OriginalCipher *cipher) {
+    printf("\n========================================\n");
+    printf("WBC1 Original - Operations Table / Таблица операций\n");
+    printf("========================================\n");
+    printf("Total operations / Всего операций: %d\n\n", NUM_OPERATIONS);
+    
+    for (int i = 0; i < NUM_OPERATIONS && i < 20; i++) {
+        printf("Operation %d: %s\n", i, cipher->operations[i].desc);
+    }
+    printf("...\n");
+    printf("(Showing first 20 of %d operations)\n", NUM_OPERATIONS);
+}
+
 /* Main function */
 int main(int argc, char *argv[]) {
     MPI_Init(&argc, &argv);
@@ -473,12 +683,119 @@ int main(int argc, char *argv[]) {
             parallel_original_decrypt(&cipher, NULL, 0, &dummy_cipher, &dummy_len);
         }
     } else if (task == 1) {
-        /* Statistical tests */
+        /* Statistical analysis with configurable data size */
+        int data_kb = 10;  /* Default 10KB */
+        if (argc >= 7) {
+            data_kb = atoi(argv[6]);
+            if (data_kb < 1) data_kb = 1;
+            if (data_kb > 1000) data_kb = 1000;
+        }
+        
         if (rank == 0) {
             printf("\n========================================\n");
-            printf("WBC1 Original - Statistical Tests\n");
+            printf("WBC1 Original - Statistical Analysis / Статистический анализ\n");
             printf("========================================\n");
-            printf("Not implemented in this simplified version\n");
+            printf("Data size / Размер данных: %d KB\n", data_kb);
+            printf("Block size / Размер блока: %d bits\n", block_size_bits);
+            printf("Key size / Размер ключа: %d bits\n", key_size);
+            printf("\n");
+            
+            int data_size = data_kb * 1024;
+            uint8_t *test_data = generate_random_bytes(data_size);
+            uint8_t *ciphertext = NULL;
+            int cipher_len = 0;
+            
+            printf("Encrypting / Шифрование...\n");
+            double start_time = MPI_Wtime();
+            parallel_original_encrypt(&cipher, test_data, data_size, &ciphertext, &cipher_len);
+            double encrypt_time = MPI_Wtime() - start_time;
+            
+            printf("Encryption completed in %.3f seconds\n", encrypt_time);
+            printf("Throughput: %.2f MB/s\n\n", (data_size / 1024.0 / 1024.0) / encrypt_time);
+            
+            /* Statistical Tests */
+            printf("Statistical Tests Results / Результаты статистических тестов:\n");
+            printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            
+            /* 1. Shannon Entropy */
+            double entropy = shannon_entropy(ciphertext, cipher_len);
+            printf("1. Shannon Entropy / Энтропия Шеннона: %.4f bits/byte\n", entropy);
+            printf("   Expected / Ожидается: ~7.9-8.0 for good encryption\n");
+            if (entropy >= 7.9) {
+                printf("   ✓ Status: Good / Хорошо\n");
+            } else {
+                printf("   ⚠ Status: Low entropy / Низкая энтропия\n");
+            }
+            printf("\n");
+            
+            /* 2. Frequency Test */
+            double freq_mean, freq_std, freq_chi;
+            frequency_test(ciphertext, cipher_len, &freq_mean, &freq_std, &freq_chi);
+            printf("2. Frequency Test / Частотный тест:\n");
+            printf("   Mean / Среднее: %.2f (expected ~127.5)\n", freq_mean);
+            printf("   Std Dev / Ст. откл.: %.2f (expected ~73.9)\n", freq_std);
+            printf("   Chi-square / Хи-квадрат: %.2f\n", freq_chi);
+            if (freq_chi < 293.0) {  /* 255 degrees of freedom, 95% confidence */
+                printf("   ✓ Status: Good distribution / Хорошее распределение\n");
+            } else {
+                printf("   ⚠ Status: May not be uniformly distributed\n");
+            }
+            printf("\n");
+            
+            /* 3. Avalanche Effect */
+            double avalanche_results[3];
+            avalanche_test(&cipher, 100, avalanche_results);
+            printf("3. Avalanche Effect Test / Тест лавинного эффекта:\n");
+            printf("   Average / Среднее: %.2f%% (expected ~50%%)\n", avalanche_results[0]);
+            printf("   Min / Минимум: %.2f%%\n", avalanche_results[1]);
+            printf("   Max / Максимум: %.2f%%\n", avalanche_results[2]);
+            if (avalanche_results[0] >= 45.0 && avalanche_results[0] <= 55.0) {
+                printf("   ✓ Status: Good avalanche / Хороший лавинный эффект\n");
+            } else {
+                printf("   ⚠ Status: Avalanche effect may be weak\n");
+            }
+            printf("\n");
+            
+            /* 4. Correlation Test */
+            int test_len = data_size < cipher_len ? data_size : cipher_len;
+            double corr = correlation_test(test_data, ciphertext, test_len);
+            printf("4. Correlation Test / Тест корреляции:\n");
+            printf("   Correlation coefficient / Коэффициент корреляции: %.6f\n", corr);
+            printf("   Expected / Ожидается: close to 0\n");
+            if (fabs(corr) < 0.1) {
+                printf("   ✓ Status: Low correlation (Good) / Низкая корреляция (Хорошо)\n");
+            } else {
+                printf("   ⚠ Status: High correlation detected\n");
+            }
+            printf("\n");
+            
+            /* 5. Differential Test */
+            double diff_results[3];
+            differential_test(&cipher, 50, diff_results);
+            printf("5. Differential Test / Дифференциальный тест:\n");
+            printf("   Average key sensitivity / Средняя чувствительность: %.2f%%\n", diff_results[0]);
+            printf("   Min / Минимум: %.2f%%\n", diff_results[1]);
+            printf("   Max / Максимум: %.2f%%\n", diff_results[2]);
+            if (diff_results[0] >= 45.0 && diff_results[0] <= 55.0) {
+                printf("   ✓ Status: Good key sensitivity / Хорошая чувствительность к ключу\n");
+            } else {
+                printf("   ⚠ Status: Key sensitivity may be weak\n");
+            }
+            
+            printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            
+            free(test_data);
+            free(ciphertext);
+        } else {
+            /* Other processes participate in encryption */
+            uint8_t *dummy_cipher = NULL;
+            int dummy_len = 0;
+            parallel_original_encrypt(&cipher, NULL, 0, &dummy_cipher, &dummy_len);
+        }
+    } else if (task == 2) {
+        /* Print operations table */
+        if (rank == 0) {
+            print_operations_table(&cipher);
         }
     }
     
