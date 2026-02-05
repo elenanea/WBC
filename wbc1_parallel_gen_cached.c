@@ -572,28 +572,34 @@ static uint32_t prf_theta(const uint8_t *key, int key_len, int round, int index)
            ((uint32_t)hash[2] << 8) | ((uint32_t)hash[3]);
 }
 
-/* Parametric face rotation with variable depth and angle */
+/* Parametric segment reversal - self-inverse operation
+ * Reversing a segment twice returns to the original
+ * This is guaranteed to be invertible without needing separate forward/inverse logic
+ */
 static void parametric_face_rotation(uint8_t *block, int param1, int param2, int inverse) {
-    uint8_t temp[BLOCK_SIZE];
-    memcpy(temp, block, BLOCK_SIZE);
+    /* Self-inverse operation - inverse flag not needed */
+    (void)inverse;
     
-    /* Extract shift amount from parameters */
-    int shift = ((param1 + param2) % (BLOCK_SIZE - 1)) + 1;  /* 1 to BLOCK_SIZE-1 */
+    /* Determine segment to reverse based on parameters */
+    int start = param1 % (BLOCK_SIZE / 2);  /* 0 to 7 */
+    int end = BLOCK_SIZE - (param2 % (BLOCK_SIZE / 2)) - 1;  /* 8 to 15 */
     
-    /* Cyclic rotation - guaranteed invertible
-     * Forward: rotate elements left (read from shifted position)
-     * Inverse: rotate elements right (read from opposite shifted position)
+    /* Ensure start < end */
+    if (start >= end) {
+        start = 0;
+        end = BLOCK_SIZE - 1;
+    }
+    
+    /* Reverse the segment - self-inverse operation
+     * Proof: reverse(reverse(x)) = x
+     * Example: [a,b,c,d] -> [d,c,b,a] -> [a,b,c,d]
      */
-    if (!inverse) {
-        /* Forward: циклический сдвиг влево - читаем из позиции (i + shift) */
-        for (int i = 0; i < BLOCK_SIZE; i++) {
-            block[i] = temp[(i + shift) % BLOCK_SIZE];
-        }
-    } else {
-        /* Inverse: циклический сдвиг вправо - читаем из позиции (i - shift) */
-        for (int i = 0; i < BLOCK_SIZE; i++) {
-            block[i] = temp[(i - shift + BLOCK_SIZE) % BLOCK_SIZE];
-        }
+    while (start < end) {
+        uint8_t temp = block[start];
+        block[start] = block[end];
+        block[end] = temp;
+        start++;
+        end--;
     }
 }
 
@@ -620,31 +626,46 @@ static void parametric_slice(uint8_t *block, int param1, int param2, int param3,
     }
 }
 
-/* Parametric pattern with key-dependent topology */
+/* Parametric pattern with key-dependent topology - self-inverse operation
+ * Uses segment reversal like the other operations to guarantee invertibility
+ */
 static void parametric_pattern(uint8_t *block, int param1, int param2, int param3, int inverse) {
-    /* Swaps are self-inverse, so inverse flag doesn't matter */
+    /* Self-inverse operation - inverse flag not needed */
     (void)inverse;
     
-    /* Deterministic swap pattern based on parameters */
-    int num_swaps = (param1 % 4) + 3;  /* 3-6 swaps */
+    /* Determine TWO segments to reverse based on parameters
+     * Each segment reversal is self-inverse
+     * Two independent reversals are also self-inverse
+     */
     
-    for (int s = 0; s < num_swaps; s++) {
-        /* Generate two different positions deterministically */
-        uint32_t seed1 = ((uint32_t)param1 * 31 + (uint32_t)param2 * 37 + (uint32_t)param3 * 41 + s * 47) % BLOCK_SIZE;
-        uint32_t seed2 = ((uint32_t)param2 * 43 + (uint32_t)param3 * 53 + (uint32_t)param1 * 59 + s * 61) % BLOCK_SIZE;
-        
-        int idx1 = seed1;
-        int idx2 = seed2;
-        
-        /* Ensure different indices */
-        if (idx1 == idx2) {
-            idx2 = (idx2 + 1) % BLOCK_SIZE;
-        }
-        
-        /* Perform swap - self-inverse */
-        uint8_t temp = block[idx1];
-        block[idx1] = block[idx2];
-        block[idx2] = temp;
+    /* First segment */
+    int start1 = param1 % (BLOCK_SIZE / 4);  /* 0-3 */
+    int end1 = start1 + (param2 % 4) + 2;   /* length 2-5 */
+    if (end1 >= BLOCK_SIZE) end1 = BLOCK_SIZE - 1;
+    
+    /* Reverse first segment */
+    int s1 = start1, e1 = end1;
+    while (s1 < e1) {
+        uint8_t temp = block[s1];
+        block[s1] = block[e1];
+        block[e1] = temp;
+        s1++;
+        e1--;
+    }
+    
+    /* Second segment (non-overlapping) */
+    int start2 = BLOCK_SIZE / 2 + (param3 % (BLOCK_SIZE / 4));  /* 8-11 */
+    int end2 = start2 + ((param1 + param2) % 4) + 2;  /* length 2-5 */
+    if (end2 >= BLOCK_SIZE) end2 = BLOCK_SIZE - 1;
+    
+    /* Reverse second segment */
+    int s2 = start2, e2 = end2;
+    while (s2 < e2) {
+        uint8_t temp = block[s2];
+        block[s2] = block[e2];
+        block[e2] = temp;
+        s2++;
+        e2--;
     }
 }
 
