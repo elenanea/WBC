@@ -152,10 +152,10 @@ test-gen-cached: $(BIN_GEN_CACHED)
 	@echo "========================================"
 	@echo ""
 	@echo "Test 1: Mode 1 (Full algorithm with key-dependent operations) with 16 rounds"
-	mpirun -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 1 256 0 16 1 10
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 1 256 0 16 1 10
 	@echo ""
 	@echo "Test 2: Mode 0 (Parametric operations) with 16 rounds"
-	mpirun -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 0 256 0 16 1 10
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 0 256 0 16 1 10
 	@echo ""
 
 # Benchmark both versions
