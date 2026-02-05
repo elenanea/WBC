@@ -580,13 +580,20 @@ static void parametric_face_rotation(uint8_t *block, int param1, int param2, int
     /* Extract shift amount from parameters */
     int shift = ((param1 + param2) % (BLOCK_SIZE - 1)) + 1;  /* 1 to BLOCK_SIZE-1 */
     
-    if (inverse) {
-        shift = BLOCK_SIZE - shift;  /* Reverse by using complementary shift */
-    }
-    
-    /* Simple cyclic rotation - guaranteed invertible */
-    for (int i = 0; i < BLOCK_SIZE; i++) {
-        block[(i + shift) % BLOCK_SIZE] = temp[i];
+    /* Cyclic rotation - guaranteed invertible
+     * Forward: rotate elements left (read from shifted position)
+     * Inverse: rotate elements right (read from opposite shifted position)
+     */
+    if (!inverse) {
+        /* Forward: циклический сдвиг влево - читаем из позиции (i + shift) */
+        for (int i = 0; i < BLOCK_SIZE; i++) {
+            block[i] = temp[(i + shift) % BLOCK_SIZE];
+        }
+    } else {
+        /* Inverse: циклический сдвиг вправо - читаем из позиции (i - shift) */
+        for (int i = 0; i < BLOCK_SIZE; i++) {
+            block[i] = temp[(i - shift + BLOCK_SIZE) % BLOCK_SIZE];
+        }
     }
 }
 
