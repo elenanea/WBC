@@ -25,6 +25,7 @@ SRC_CACHED = wbc1_parallel_cached.c
 SRC_BASIC_NEW = wbc1_parallel_new.c
 SRC_CACHED_NEW = wbc1_parallel_cached_new.c
 SRC_CACHED_OPTI = wbc1_parallel_cached_opti.c
+SRC_GEN_CACHED = wbc1_parallel_gen_cached.c
 SRC_MINIMAL = wbc1_parallel_minimal.c
 
 # Output binaries
@@ -33,6 +34,7 @@ BIN_CACHED = wbc1_parallel_cached
 BIN_BASIC_NEW = wbc1_parallel_new
 BIN_CACHED_NEW = wbc1_parallel_cached_new
 BIN_CACHED_OPTI = wbc1_parallel_cached_opti
+BIN_GEN_CACHED = wbc1_parallel_gen_cached
 BIN_MINIMAL = wbc1_parallel_minimal
 
 # Default target
@@ -80,9 +82,15 @@ cached-opti: $(BIN_CACHED_OPTI)
 $(BIN_CACHED_OPTI): $(SRC_CACHED_OPTI)
 	$(MPICC) $(CFLAGS) -o $(BIN_CACHED_OPTI) $(SRC_CACHED_OPTI) $(LDFLAGS)
 
+# Build parametric generative cached version (Key-dependent operations)
+gen-cached: $(BIN_GEN_CACHED)
+
+$(BIN_GEN_CACHED): $(SRC_GEN_CACHED)
+	$(MPICC) $(CFLAGS) -o $(BIN_GEN_CACHED) $(SRC_GEN_CACHED) $(LDFLAGS)
+
 # Clean build artifacts
 clean:
-	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_CACHED_OPTI) $(BIN_MINIMAL) *.o
+	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_CACHED_OPTI) $(BIN_GEN_CACHED) $(BIN_MINIMAL) *.o
 
 # Run tests
 test: test-basic test-cached
@@ -138,6 +146,18 @@ test-cached-new: $(BIN_CACHED_NEW)
 	mpirun -n $(NUM_PROCS) ./$(BIN_CACHED_NEW) 0 16
 	@echo ""
 
+test-gen-cached: $(BIN_GEN_CACHED)
+	@echo "========================================"
+	@echo "Testing PARAMETRIC GENERATIVE Cached Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Mode 1 (Full algorithm with key-dependent operations) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 1 256 0 16 1 10
+	@echo ""
+	@echo "Test 2: Mode 0 (Parametric operations) with 16 rounds"
+	mpirun -n $(NUM_PROCS) ./$(BIN_GEN_CACHED) 0 256 0 16 1 10
+	@echo ""
+
 # Benchmark both versions
 benchmark: $(BIN_BASIC) $(BIN_CACHED)
 	@echo "========================================"
@@ -159,23 +179,33 @@ help:
 	@echo "  all         - Build both basic and cached versions (default)"
 	@echo "  basic       - Build basic parallel version"
 	@echo "  cached      - Build cached/optimized version"
+	@echo "  cached-opti - Build ultra-optimized version with rotation cache"
+	@echo "  gen-cached  - Build parametric generative version (key-dependent operations)"
 	@echo "  clean       - Remove all compiled binaries"
 	@echo "  test        - Run tests for both versions"
 	@echo "  test-basic  - Run test for basic version"
 	@echo "  test-cached - Run test for cached version"
+	@echo "  test-gen-cached - Run test for generative parametric version"
 	@echo "  benchmark   - Compare performance of both versions"
 	@echo "  help        - Show this help message"
 	@echo ""
 	@echo "Usage examples:"
 	@echo "  make                           # Build both versions"
-	@echo "  make cached                    # Build only cached version"
+	@echo "  make gen-cached                # Build parametric generative version"
 	@echo "  make test NUM_PROCS=8          # Test with 8 MPI processes"
 	@echo "  mpirun -n 4 ./wbc1_parallel 1 16    # Run basic: mode=1, rounds=16"
-	@echo "  mpirun -n 4 ./wbc1_parallel_cached 0 32  # Run cached: mode=0, rounds=32"
+	@echo "  mpirun -n 4 ./wbc1_parallel_gen_cached 1 256 0 16 1 10  # Run generative"
 	@echo ""
 	@echo "Algorithm modes:"
 	@echo "  Mode 0: Simplified (2 operations: permutation + rotation)"
 	@echo "  Mode 1: Full (5 operations: permutation + XOR + S-box + diffusion + rotation)"
+	@echo ""
+	@echo "Versions:"
+	@echo "  wbc1_parallel              - Basic version (1 op/round)"
+	@echo "  wbc1_parallel_new          - Enhanced (32 ops/round)"
+	@echo "  wbc1_parallel_cached_new   - Cached enhanced (32 ops/round)"
+	@echo "  wbc1_parallel_cached_opti  - Ultra-optimized (rotation cache)"
+	@echo "  wbc1_parallel_gen_cached   - Parametric generative (key-dependent ops)"
 	@echo ""
 
 .PHONY: all basic cached clean test test-basic test-cached benchmark help
