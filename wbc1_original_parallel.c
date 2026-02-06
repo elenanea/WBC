@@ -663,7 +663,21 @@ int main(int argc, char *argv[]) {
         if (argc >= 7 && mode == 1) {
             data_kb = atoi(argv[6]);
             if (data_kb < 1) data_kb = 1;
-            if (data_kb > 100000) data_kb = 100000;  /* Max 100MB */
+            if (data_kb > 10000) data_kb = 10000;  /* Max 10MB - original algorithm is slow for large data */
+        }
+        
+        /* Performance warning for large data (task 0, mode 1 - random data) */
+        if (rank == 0 && mode == 1 && data_kb > 1000) {
+            int block_size_bytes = block_size_bits / 8;
+            long long estimated_blocks = ((long long)data_kb * 1024) / block_size_bytes;
+            long long estimated_ops = estimated_blocks * key_size;
+            printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
+            printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
+            printf("  Estimated operations: %.2f billion (block × key_bits)\n", estimated_ops / 1e9);
+            printf("  This may take several minutes with this algorithm.\n");
+            printf("  Это может занять несколько минут с этим алгоритмом.\n");
+            printf("  Consider using enhanced versions for large data.\n");
+            printf("  Рассмотрите использование улучшенных версий для больших данных.\n\n");
         }
         
         if (rank == 0) {
@@ -755,7 +769,19 @@ int main(int argc, char *argv[]) {
         if (argc >= 7) {
             data_kb = atoi(argv[6]);
             if (data_kb < 1) data_kb = 1;
-            if (data_kb > 100000) data_kb = 100000;  /* Max 100MB */
+            if (data_kb > 1000) data_kb = 1000;  /* Max 1MB - original algorithm is slow for large data */
+        }
+        
+        /* Performance warning for statistical analysis with large data */
+        if (rank == 0 && data_kb > 100) {
+            int block_size_bytes = block_size_bits / 8;
+            long long estimated_blocks = ((long long)data_kb * 1024) / block_size_bytes;
+            long long estimated_ops = estimated_blocks * key_size;
+            printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
+            printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
+            printf("  Estimated operations: %.2f billion (blocks × key_bits)\n", estimated_ops / 1e9);
+            printf("  Processing may take a while...\n");
+            printf("  Обработка может занять некоторое время...\n\n");
         }
         
         if (rank == 0) {
