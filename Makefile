@@ -90,7 +90,7 @@ $(BIN_GEN_CACHED): $(SRC_GEN_CACHED)
 
 # Clean build artifacts
 clean:
-	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_CACHED_OPTI) $(BIN_GEN_CACHED) $(BIN_MINIMAL) *.o
+	rm -f $(BIN_BASIC) $(BIN_CACHED) $(BIN_ORIGINAL) $(BIN_ORIGINAL_CACHED) $(BIN_BASIC_NEW) $(BIN_CACHED_NEW) $(BIN_CACHED_OPTI) $(BIN_GEN_CACHED) $(BIN_MINIMAL) *.o
 
 # Run tests
 test: test-basic test-cached
@@ -232,3 +232,28 @@ test-original: $(BIN_ORIGINAL)
 	@echo "Test 2: Text encryption with 128-bit blocks"
 	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL) 0 256 0 128
 	@echo ""
+
+# Build original algorithm CACHED version (with operation caching)
+SRC_ORIGINAL_CACHED = wbc1_original_cached.c
+BIN_ORIGINAL_CACHED = wbc1_original_cached
+
+original-cached: $(BIN_ORIGINAL_CACHED)
+
+$(BIN_ORIGINAL_CACHED): $(SRC_ORIGINAL_CACHED)
+$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Test original cached version
+test-original-cached: $(BIN_ORIGINAL_CACHED)
+@echo "========================================"
+@echo "Testing ORIGINAL CACHED Algorithm Version"
+@echo "========================================"
+@echo ""
+@echo "Test 1: Text encryption with 32-bit blocks (cached)"
+mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 32
+@echo ""
+@echo "Test 2: Text encryption with 128-bit blocks (cached)"
+mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 128
+@echo ""
+@echo "Test 3: Print operations table"
+mpirun --oversubscribe -n 1 ./$(BIN_ORIGINAL_CACHED) 2 256 0 128
+@echo ""
