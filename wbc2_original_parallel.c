@@ -176,6 +176,9 @@ static void generate_round_keys(WBC2OriginalCipher *cipher) {
     }
 }
 
+/* Forward declarations */
+static void cyclic_bitwise_shift(uint8_t *block, int size_bytes, int shift_bits);
+
 /* Apply S-box to block */
 static void apply_sbox(uint8_t *block, int block_size_bytes, const uint8_t sbox[256]) {
     for (int i = 0; i < block_size_bytes; i++) {
@@ -528,7 +531,7 @@ static void apply_operation(WBC2OriginalCipher *cipher, uint8_t *block, int op_i
 }
 
 /* Initialize cipher */
-void wbc2_original_init(WBC2OriginalCipher *cipher, const uint8_t *key, int key_len, int block_size_bits) {
+void wbc2_original_init(WBC2OriginalCipher *cipher, const uint8_t *key, int key_len, int block_size_bits, int num_rounds) {
     memset(cipher, 0, sizeof(WBC2OriginalCipher));
     
     /* Store key */
@@ -555,7 +558,7 @@ void wbc2_original_init(WBC2OriginalCipher *cipher, const uint8_t *key, int key_
     init_operations(cipher, cipher->key, cipher->key_len_bytes);
     
     /* WBC2 specific: Initialize S-box and round keys */
-    cipher->num_rounds = 10;  /* 10 rounds after round 0 */
+    cipher->num_rounds = num_rounds;  /* Use parameter instead of hardcoded 10 */
     generate_sbox(cipher->key, cipher->key_len_bytes, cipher->sbox, cipher->inv_sbox);
     generate_round_keys(cipher);
 }
@@ -1292,7 +1295,7 @@ int main(int argc, char *argv[]) {
     
     if (argc < 5) {
         if (rank == 0) {
-            printf("Usage: %s <task> <key_size> <key_source> <block_size_bits> [mode] [data_size_kb]\n", argv[0]);
+            printf("Usage: %s <task> <key_size> <key_source> <block_size_bits> [mode] [data_size_kb] [num_rounds]\n", argv[0]);
             printf("  task: 0=encrypt/decrypt, 1=statistical tests, 2=print operations table\n");
             printf("  key_size: key size in bits (128, 192, 256)\n");
             printf("  key_source: 0=random, 1=from file\n");
@@ -1300,12 +1303,15 @@ int main(int argc, char *argv[]) {
             printf("  mode: (for task 0) 0=use demo text, 1=generate random data\n");
             printf("         (for task 1) 0=simple, 1=full\n");
             printf("  data_size_kb: amount of data in KB (for task 0 with mode=1, or task 1)\n");
+            printf("  num_rounds: Optional: number of rounds (default: 10, range: 1-100)\n");
             printf("\nExamples:\n");
-            printf("  %s 0 256 0 128          # Encrypt demo text\n", argv[0]);
+            printf("  %s 0 256 0 128          # Encrypt demo text (10 rounds)\n", argv[0]);
             printf("  %s 0 256 0 0 1 10       # Encrypt 10KB with automatic block size\n", argv[0]);
-            printf("  %s 0 256 0 128 1 10     # Encrypt 10KB random data\n", argv[0]);
+            printf("  %s 0 256 0 128 1 10     # Encrypt 10KB random data (10 rounds)\n", argv[0]);
+            printf("  %s 0 256 0 128 1 10 20  # Encrypt 10KB with 20 rounds\n", argv[0]);
             printf("  %s 1 256 0 0 1 100      # Statistical tests with auto block size\n", argv[0]);
             printf("  %s 1 256 0 128 1 100    # Statistical tests with 100KB data\n", argv[0]);
+            printf("  %s 1 256 0 128 1 100 15 # Statistical tests with 15 rounds\n", argv[0]);
             printf("  %s 2 256 0 128          # Print operations table\n", argv[0]);
         }
         MPI_Finalize();
@@ -1327,6 +1333,19 @@ int main(int argc, char *argv[]) {
         data_kb = atoi(argv[6]);
         if (data_kb < 1) data_kb = 1;
         if (data_kb > 10000) data_kb = 10000;  /* Max 10MB */
+    }
+    
+    /* Optional: num_rounds (default 10) */
+    int num_rounds = 10;  /* default value */
+    if (argc >= 8) {
+        num_rounds = atoi(argv[7]);
+        if (num_rounds < 1 || num_rounds > 100) {
+            if (rank == 0) {
+                fprintf(stderr, "Error: num_rounds must be between 1 and 100 (got %d)\n", num_rounds);
+            }
+            MPI_Finalize();
+            return 1;
+        }
     }
     
     /* Automatic block size selection if block_size_bits = 0 */
@@ -1404,7 +1423,18 @@ int main(int argc, char *argv[]) {
     
     /* Initialize cipher */
     WBC2OriginalCipher cipher;
-    wbc2_original_init(&cipher, key, key_len, block_size_bits);
+    wbc2_original_init(&cipher, key, key_len, block_size_bits, num_rounds);
+    
+    /* Display configuration info */
+    if (rank == 0) {
+        printf("\n");
+        printf("WBC2 Enhanced Algorithm\n");
+        printf("Key size: %d bits\n", key_size);
+        printf("Block size: %d bits (%d bytes)\n", block_size_bits, block_size_bits / 8);
+        printf("Number of rounds: %d\n", num_rounds);
+        printf("Data size: %d KB\n", data_kb);
+        printf("\n");
+    }
     
     if (task == 0) {
         /* Text encryption/decryption */
