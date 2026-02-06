@@ -781,10 +781,10 @@ static void print_operations_table(WBC1OriginalCipher *cipher) {
     printf("==============================================================================\n");
     printf("          WBC1 ORIGINAL - ТАБЛИЦА ОПЕРАЦИЙ / OPERATIONS TABLE\n");
     printf("==============================================================================\n");
-    printf("%-7s %-10s %-10s %-10s %s\n", 
-           "Номер", "ASCII", "Hex", "Бит ключа", "Описание операции");
-    printf("%-7s %-10s %-10s %-10s %s\n", 
-           "Number", "Char", "Code", "Key bit", "Operation Description");
+    printf("%-7s %-10s %-10s %s\n", 
+           "Номер", "ASCII", "Hex", "Описание операции");
+    printf("%-7s %-10s %-10s %s\n", 
+           "Number", "Char", "Code", "Operation Description");
     printf("------------------------------------------------------------------------------\n");
     
     for (int i = 0; i < NUM_OPERATIONS; i++) {
@@ -802,31 +802,99 @@ static void print_operations_table(WBC1OriginalCipher *cipher) {
         char hex[12];
         snprintf(hex, sizeof(hex), "0x%02X", i);
         
-        /* Key bit info - which key bits map to this operation */
-        char keybit_info[12];
-        snprintf(keybit_info, sizeof(keybit_info), "%d mod 127", i);
+        /* Print operation info with type and parameters */
+        printf("%-7d %-10s %-10s ", i, ascii_char, hex);
         
-        /* Print operation info */
-        printf("%-7d %-10s %-10s %-10s ", i, ascii_char, hex, keybit_info);
-        
-        /* Print operation description */
-        if (strlen(op->desc) > 0) {
-            printf("%s\n", op->desc);
-        } else {
-            printf("Permutation operation %d\n", i);
+        /* Print operation details including type and chain info */
+        printf("(%s", op->type);
+        if (strlen(op->param1) > 0) {
+            printf(", '%s'", op->param1);
         }
+        if (strlen(op->param2) > 0) {
+            printf(", '%s'", op->param2);
+        }
+        if (op->chain_length > 0) {
+            printf(", chain=%d ops", op->chain_length);
+        }
+        printf(") %s\n", op->desc);
     }
     
     printf("==============================================================================\n");
     printf("Всего операций / Total operations: %d\n", NUM_OPERATIONS);
-    printf("Биты ключа / Key bits: %d\n", cipher->key_len_bits);
-    printf("Каждый бит ключа выбирает операцию (бит mod 127) /\n");
-    printf("Each key bit selects an operation (bit mod 127)\n");
+    
+    /* Count operation types */
+    int dynamic_count = 0;
+    for (int i = 0; i < NUM_OPERATIONS; i++) {
+        if (strcmp(cipher->operations[i].type, "dynamic") == 0) {
+            dynamic_count++;
+        }
+    }
+    
+    printf("\nТипы операций / Operation types:\n");
+    printf("  - Динамические операции / Dynamic operations: %d\n", dynamic_count);
+    printf("  - Базовые операции / Base operations: %d\n", cipher->base_ops_count);
+    printf("    - Вращения граней / Face rotations: 24\n");
+    printf("    - Срезы / Slice moves: 12\n");
+    printf("    - Широкие ходы / Wide moves: 24\n");
+    printf("    - Вращения куба / Cube rotations: 12\n");
+    printf("    - Swap операции / Swap operations: 12\n");
+    printf("    - Diagonal flips: 3\n");
+    printf("    - Динамические паттерны / Dynamic patterns: 20\n");
     printf("==============================================================================\n\n");
     
     /* Additional statistics */
-    printf("\nПримеры отображения битов ключа на операции:\n");
-    printf("Examples of key bit to operation mapping:\n");
+    printf("\nПримеры базовых операций / Examples of base operations:\n");
+    printf("------------------------------------------------------------------------------\n");
+    
+    /* Show first few of each type from base_operations */
+    if (cipher->base_operations) {
+        printf("Вращения граней (Face rotations):\n");
+        for (int i = 0; i < 6 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nСрезы (Slice moves):\n");
+        for (int i = 24; i < 28 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nШирокие ходы (Wide moves):\n");
+        for (int i = 36; i < 40 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nВращения куба (Cube rotations):\n");
+        for (int i = 60; i < 64 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nSwap операции:\n");
+        for (int i = 72; i < 76 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nДиагональные перевороты (Diagonal flips):\n");
+        for (int i = 84; i < 87 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s') %s\n", i, op->type, op->param1, op->param2, op->desc);
+        }
+        
+        printf("\nДинамические паттерны (Dynamic patterns):\n");
+        for (int i = 87; i < 90 && i < cipher->base_ops_count; i++) {
+            Operation *op = &cipher->base_operations[i];
+            printf("  %d: (%s, '%s', '%s', chain=%d ops) %s\n", 
+                   i, op->type, op->param1, op->param2, op->chain_length, op->desc);
+        }
+    }
+    printf("==============================================================================\n\n");
+    
+    printf("Отображение битов ключа на операции:\n");
+    printf("Key bit to operation mapping:\n");
     printf("------------------------------------------------------------------------------\n");
     for (int i = 0; i < 10 && i < cipher->key_len_bits; i++) {
         int key_bit = get_key_bit(cipher->key, i, cipher->key_len_bytes);
