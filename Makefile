@@ -257,3 +257,28 @@ test-original-cached: $(BIN_ORIGINAL_CACHED)
 	@echo "Test 3: Print operations table"
 	mpirun --oversubscribe -n 1 ./$(BIN_ORIGINAL_CACHED) 2 256 0 128
 	@echo ""
+
+# Build WBC2 enhanced algorithm version (with XOR, S-box, diffusion)
+SRC_WBC2 = wbc2_original_parallel.c
+BIN_WBC2 = wbc2_original_parallel
+
+wbc2: $(BIN_WBC2)
+
+$(BIN_WBC2): $(SRC_WBC2)
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Test WBC2 version
+test-wbc2: $(BIN_WBC2)
+	@echo "========================================"
+	@echo "Testing WBC2 ENHANCED Algorithm Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Text encryption with 32-bit blocks"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_WBC2) 0 256 0 32 1 10
+	@echo ""
+	@echo "Test 2: Differential analysis with 128-bit blocks"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_WBC2) 1 256 0 128 1 100
+	@echo ""
+	@echo "Test 3: Operations table"
+	mpirun --oversubscribe -n 1 ./$(BIN_WBC2) 2 256 0 64
+	@echo ""
