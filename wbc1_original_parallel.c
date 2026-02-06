@@ -356,7 +356,27 @@ void parallel_original_decrypt(WBC1OriginalCipher *cipher, const uint8_t *cipher
     /* Remove padding on root */
     if (rank == 0) {
         int padding_len = gathered_plaintext[ciphertext_len - 1];
-        *plaintext_len = ciphertext_len - padding_len;
+        
+        /* Validate PKCS7 padding */
+        int valid_padding = 0;
+        if (padding_len > 0 && padding_len <= block_size) {
+            valid_padding = 1;
+            /* Check that all padding bytes have the same value */
+            for (int i = ciphertext_len - padding_len; i < ciphertext_len; i++) {
+                if (gathered_plaintext[i] != padding_len) {
+                    valid_padding = 0;
+                    break;
+                }
+            }
+        }
+        
+        /* Remove padding only if valid */
+        if (valid_padding) {
+            *plaintext_len = ciphertext_len - padding_len;
+        } else {
+            *plaintext_len = ciphertext_len;  /* No padding to remove */
+        }
+        
         *plaintext = (uint8_t *)malloc(*plaintext_len);
         memcpy(*plaintext, gathered_plaintext, *plaintext_len);
         free(gathered_plaintext);
