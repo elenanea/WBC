@@ -586,16 +586,80 @@ static void print_hex(const uint8_t *data, int len, int max_bytes) {
 
 /* Print operations table */
 static void print_operations_table(WBC1OriginalCipher *cipher) {
-    printf("\n========================================\n");
-    printf("WBC1 Original - Operations Table / Таблица операций\n");
-    printf("========================================\n");
-    printf("Total operations / Всего операций: %d\n\n", NUM_OPERATIONS);
+    printf("\n");
+    printf("==============================================================================\n");
+    printf("          WBC1 ORIGINAL - ТАБЛИЦА ОПЕРАЦИЙ / OPERATIONS TABLE\n");
+    printf("==============================================================================\n");
+    printf("%-7s %-10s %-10s %-10s %s\n", 
+           "Номер", "ASCII", "Hex", "Бит ключа", "Описание операции");
+    printf("%-7s %-10s %-10s %-10s %s\n", 
+           "Number", "Char", "Code", "Key bit", "Operation Description");
+    printf("------------------------------------------------------------------------------\n");
     
-    for (int i = 0; i < NUM_OPERATIONS && i < 20; i++) {
-        printf("Operation %d: %s\n", i, cipher->operations[i].desc);
+    for (int i = 0; i < NUM_OPERATIONS; i++) {
+        Operation *op = &cipher->operations[i];
+        
+        /* ASCII character (printable or . for non-printable) */
+        char ascii_char[12];
+        if (i >= 32 && i < 127) {
+            snprintf(ascii_char, sizeof(ascii_char), "'%c'", (char)i);
+        } else {
+            snprintf(ascii_char, sizeof(ascii_char), ".");
+        }
+        
+        /* Hex representation */
+        char hex[12];
+        snprintf(hex, sizeof(hex), "0x%02X", i);
+        
+        /* Key bit info - which key bits map to this operation */
+        char keybit_info[12];
+        snprintf(keybit_info, sizeof(keybit_info), "%d mod 127", i);
+        
+        /* Print operation info */
+        printf("%-7d %-10s %-10s %-10s ", i, ascii_char, hex, keybit_info);
+        
+        /* Print operation description */
+        if (strlen(op->desc) > 0) {
+            printf("%s\n", op->desc);
+        } else {
+            printf("Permutation operation %d\n", i);
+        }
     }
-    printf("...\n");
-    printf("(Showing first 20 of %d operations)\n", NUM_OPERATIONS);
+    
+    printf("==============================================================================\n");
+    printf("Всего операций / Total operations: %d\n", NUM_OPERATIONS);
+    printf("Биты ключа / Key bits: %d\n", cipher->key_len_bits);
+    printf("Каждый бит ключа выбирает операцию (бит mod 127) /\n");
+    printf("Each key bit selects an operation (bit mod 127)\n");
+    printf("==============================================================================\n\n");
+    
+    /* Additional statistics */
+    printf("\nПримеры отображения битов ключа на операции:\n");
+    printf("Examples of key bit to operation mapping:\n");
+    printf("------------------------------------------------------------------------------\n");
+    for (int i = 0; i < 10 && i < cipher->key_len_bits; i++) {
+        int key_bit = get_key_bit(cipher->key, i, cipher->key_len_bytes);
+        int op_id = key_bit % NUM_OPERATIONS;
+        
+        /* Show ASCII if printable */
+        char op_ascii[20];
+        if (op_id >= 32 && op_id < 127) {
+            snprintf(op_ascii, sizeof(op_ascii), "'%c' (0x%02X)", (char)op_id, op_id);
+        } else {
+            snprintf(op_ascii, sizeof(op_ascii), "0x%02X", op_id);
+        }
+        
+        printf("  Бит ключа %3d: значение=%d → операция %3d %s\n", 
+               i, key_bit, op_id, op_ascii);
+        printf("  Key bit    %3d: value=%d    → operation %3d %s\n", 
+               i, key_bit, op_id, op_ascii);
+    }
+    if (cipher->key_len_bits > 10) {
+        printf("  ...\n");
+        printf("  (Показано первых 10 из %d битов ключа)\n", cipher->key_len_bits);
+        printf("  (Showing first 10 of %d key bits)\n", cipher->key_len_bits);
+    }
+    printf("==============================================================================\n");
 }
 
 /* Main function */
@@ -609,7 +673,7 @@ int main(int argc, char *argv[]) {
     if (argc < 5) {
         if (rank == 0) {
             printf("Usage: %s <task> <key_size> <key_source> <block_size_bits> [mode] [data_size_kb]\n", argv[0]);
-            printf("  task: 0=encrypt/decrypt, 1=statistical tests\n");
+            printf("  task: 0=encrypt/decrypt, 1=statistical tests, 2=print operations table\n");
             printf("  key_size: key size in bits (128, 192, 256)\n");
             printf("  key_source: 0=random, 1=from file\n");
             printf("  block_size_bits: block size in bits (32, 64, 128, 512)\n");
@@ -620,6 +684,7 @@ int main(int argc, char *argv[]) {
             printf("  %s 0 256 0 128          # Encrypt demo text\n", argv[0]);
             printf("  %s 0 256 0 128 1 10     # Encrypt 10KB random data\n", argv[0]);
             printf("  %s 1 256 0 128 1 100    # Statistical tests with 100KB data\n", argv[0]);
+            printf("  %s 2 256 0 128          # Print operations table\n", argv[0]);
         }
         MPI_Finalize();
         return 1;
