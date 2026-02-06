@@ -60,6 +60,7 @@ typedef struct {
 } WBC1OriginalCipher;
 
 /* Helper functions */
+__attribute__((unused))
 static void sha256_hash(const uint8_t *data, size_t len, uint8_t *output) {
     EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
     EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL);
@@ -672,7 +673,7 @@ int main(int argc, char *argv[]) {
                 printf("Mode: Random data\n");
                 printf("Data size: %d KB (%d bytes)\n", data_kb, text_len);
                 printf("First 64 bytes of plaintext:\n");
-                print_hex(plaintext, text_len < 64 ? text_len : 64);
+                print_hex(plaintext, text_len, 64);
             }
             
             printf("Block size: %d bits (%d bytes)\n", block_size_bits, block_size_bits / 8);
@@ -688,8 +689,7 @@ int main(int argc, char *argv[]) {
             double encrypt_time = MPI_Wtime() - start_time;
             
             printf("\nEncrypted (%d bytes):\n", ciphertext_len);
-            print_hex(ciphertext, ciphertext_len < 64 ? ciphertext_len : 64);
-            if (ciphertext_len > 64) printf("...\n");
+            print_hex(ciphertext, ciphertext_len, 64);
             
             uint8_t *decrypted = NULL;
             int decrypted_len = 0;
@@ -702,7 +702,7 @@ int main(int argc, char *argv[]) {
                 printf("\nDecrypted text: %.*s\n", decrypted_len, decrypted);
             } else {
                 printf("\nDecrypted (%d bytes), first 64 bytes:\n", decrypted_len);
-                print_hex(decrypted, decrypted_len < 64 ? decrypted_len : 64);
+                print_hex(decrypted, decrypted_len, 64);
             }
             
             printf("\nEncryption time: %.6f seconds\n", encrypt_time);
