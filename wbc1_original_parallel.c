@@ -1016,13 +1016,15 @@ int main(int argc, char *argv[]) {
             printf("  task: 0=encrypt/decrypt, 1=statistical tests, 2=print operations table\n");
             printf("  key_size: key size in bits (128, 192, 256)\n");
             printf("  key_source: 0=random, 1=from file\n");
-            printf("  block_size_bits: block size in bits (32, 64, 128, 512)\n");
+            printf("  block_size_bits: block size in bits (32, 64, 128, 512, or 0 for automatic)\n");
             printf("  mode: (for task 0) 0=use demo text, 1=generate random data\n");
             printf("         (for task 1) 0=simple, 1=full\n");
             printf("  data_size_kb: amount of data in KB (for task 0 with mode=1, or task 1)\n");
             printf("\nExamples:\n");
             printf("  %s 0 256 0 128          # Encrypt demo text\n", argv[0]);
+            printf("  %s 0 256 0 0 1 10       # Encrypt 10KB with automatic block size\n", argv[0]);
             printf("  %s 0 256 0 128 1 10     # Encrypt 10KB random data\n", argv[0]);
+            printf("  %s 1 256 0 0 1 100      # Statistical tests with auto block size\n", argv[0]);
             printf("  %s 1 256 0 128 1 100    # Statistical tests with 100KB data\n", argv[0]);
             printf("  %s 2 256 0 128          # Print operations table\n", argv[0]);
         }
@@ -1034,6 +1036,72 @@ int main(int argc, char *argv[]) {
     int key_size = atoi(argv[2]);
     int key_source = atoi(argv[3]);
     int block_size_bits = atoi(argv[4]);
+    
+    /* Get data size early for auto-selection */
+    int data_kb = 1;  /* default */
+    int mode = 0;
+    if (argc >= 6) {
+        mode = atoi(argv[5]);
+    }
+    if (argc >= 7) {
+        data_kb = atoi(argv[6]);
+        if (data_kb < 1) data_kb = 1;
+        if (data_kb > 10000) data_kb = 10000;  /* Max 10MB */
+    }
+    
+    /* Automatic block size selection if block_size_bits = 0 */
+    if (block_size_bits == 0) {
+        /* Auto-select based on data size for optimal test results */
+        if (data_kb < 10) {
+            block_size_bits = 32;   /* Small data: better avalanche */
+        } else if (data_kb < 100) {
+            block_size_bits = 64;   /* Medium-small: balanced */
+        } else if (data_kb < 1000) {
+            block_size_bits = 128;  /* Medium: better differential */
+        } else {
+            block_size_bits = 512;  /* Large data: best differential */
+        }
+        
+        if (rank == 0) {
+            printf("\n=================================================================\n");
+            printf("AUTOMATIC BLOCK SIZE SELECTION / АВТОМАТИЧЕСКИЙ ВЫБОР РАЗМЕРА БЛОКА\n");
+            printf("=================================================================\n");
+            printf("Data size / Размер данных: %d KB\n", data_kb);
+            printf("Selected block size / Выбранный размер блока: %d bits\n", block_size_bits);
+            printf("\nReason / Причина: ");
+            if (data_kb < 10) {
+                printf("Very small data - prioritize avalanche effect\n");
+                printf("         Очень малые данные - приоритет лавинному эффекту\n");
+            } else if (data_kb < 100) {
+                printf("Small data - balanced approach\n");
+                printf("         Малые данные - сбалансированный подход\n");
+            } else if (data_kb < 1000) {
+                printf("Medium data - better differential analysis\n");
+                printf("         Средние данные - лучший дифференциальный анализ\n");
+            } else {
+                printf("Large data - best differential analysis\n");
+                printf("         Большие данные - лучший дифференциальный анализ\n");
+            }
+            printf("\nExpected results / Ожидаемые результаты:\n");
+            printf("  - Differential analysis / Диф. анализ: ");
+            if (block_size_bits >= 128) {
+                printf("Excellent / Отлично\n");
+            } else if (block_size_bits >= 64) {
+                printf("Good / Хорошо\n");
+            } else {
+                printf("Moderate / Умеренно\n");
+            }
+            printf("  - Avalanche effect / Лавинный эффект: ");
+            if (block_size_bits <= 64) {
+                printf("Excellent / Отлично\n");
+            } else if (block_size_bits <= 128) {
+                printf("Good / Хорошо\n");
+            } else {
+                printf("Moderate / Умеренно\n");
+            }
+            printf("=================================================================\n\n");
+        }
+    }
     
     /* Generate or load key */
     int key_len = key_size / 8;
@@ -1060,16 +1128,7 @@ int main(int argc, char *argv[]) {
     
     if (task == 0) {
         /* Text encryption/decryption */
-        int mode = 0;  /* 0 = demo text, 1 = random data */
-        int data_kb = 1;
-        if (argc >= 6) {
-            mode = atoi(argv[5]);
-        }
-        if (argc >= 7 && mode == 1) {
-            data_kb = atoi(argv[6]);
-            if (data_kb < 1) data_kb = 1;
-            if (data_kb > 10000) data_kb = 10000;  /* Max 10MB - original algorithm is slow for large data */
-        }
+        /* mode and data_kb already set above for auto-selection */
         
         /* Performance warning for large data (task 0, mode 1 - random data) */
         if (rank == 0 && mode == 1 && data_kb > 1000) {
@@ -1174,27 +1233,36 @@ int main(int argc, char *argv[]) {
         }
     } else if (task == 1) {
         /* Statistical analysis with configurable data size */
-        int data_kb = 10;  /* Default 10KB */
+        /* data_kb already set above for auto-selection, but need to get it for task 1 if not set */
         if (argc >= 7) {
-            data_kb = atoi(argv[6]);
-            if (data_kb < 1) data_kb = 1;
-            if (data_kb > 1000) data_kb = 1000;  /* Max 1MB - original algorithm is slow for large data */
+            int task1_data_kb = atoi(argv[6]);
+            if (task1_data_kb >= 1 && task1_data_kb <= 1000) {
+                data_kb = task1_data_kb;
+            }
         }
+        if (data_kb > 1000) data_kb = 1000;  /* Max 1MB - original algorithm is slow for large data */
         
         /* Performance warning for statistical analysis with large data */
-        if (rank == 0 && data_kb > 100) {
+        double estimated_time_seconds = 0.0;
+        if (rank == 0) {
             int block_size_bytes = block_size_bits / 8;
             long long estimated_blocks = ((long long)data_kb * 1024) / block_size_bytes;
             /* BYTE-BASED algorithm: operations = blocks × key_bytes (not key_bits!) */
             int key_bytes = key_size / 8;  /* 256 bits = 32 bytes */
             long long estimated_ops = estimated_blocks * key_bytes;
-            printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
-            printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
-            printf("  Estimated operations: %.2f million (blocks × key_bytes)\n", estimated_ops / 1e6);
-            printf("  With byte-based algorithm: %d operations per block\n", key_bytes);
-            printf("  Estimated processing time: ~%.1f seconds\n", (estimated_ops / 1e6) * 0.003);
-            printf("  Processing may take a while...\n");
-            printf("  Обработка может занять некоторое время...\n\n");
+            double estimated_ops_millions = estimated_ops / 1e6;
+            estimated_time_seconds = estimated_ops_millions / 327.68;  /* Calibrated */
+            
+            /* Only show warning if processing will take more than 1 second */
+            if (estimated_time_seconds > 1.0) {
+                printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
+                printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
+                printf("  Estimated operations: %.2f million (blocks × key_bytes)\n", estimated_ops_millions);
+                printf("  With byte-based algorithm: %d operations per block\n", key_bytes);
+                printf("  Estimated processing time: ~%.1f seconds\n", estimated_time_seconds);
+                printf("  Processing may take a while...\n");
+                printf("  Обработка может занять некоторое время...\n\n");
+            }
         }
         
         if (rank == 0) {
