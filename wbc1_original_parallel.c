@@ -372,6 +372,27 @@ void wbc1_original_free(WBC1OriginalCipher *cipher) {
     memset(cipher, 0, sizeof(WBC1OriginalCipher));
 }
 
+/* Mix key byte to ensure all bits have equal influence on operation selection */
+static uint8_t mix_key_byte(uint8_t byte) {
+    /* XOR-based mixing function for better bit diffusion
+     * This ensures that flipping any single bit in the key byte
+     * will have approximately equal impact on the selected operation.
+     * Without mixing, high-order bits have weak influence due to modulo 127.
+     */
+    uint8_t mixed = byte;
+    
+    /* Mix high bits into low bits */
+    mixed ^= (byte >> 4);
+    
+    /* Mix with rotation for circular diffusion */
+    mixed ^= ((byte << 3) | (byte >> 5));
+    
+    /* Final mixing pass */
+    mixed ^= (byte >> 1);
+    
+    return mixed;
+}
+
 /* Encrypt single block using original algorithm (BYTE-BASED) */
 void wbc1_original_encrypt_block(WBC1OriginalCipher *cipher, const uint8_t *plaintext, uint8_t *ciphertext) {
     /* Copy plaintext to ciphertext (working buffer) */
@@ -379,9 +400,10 @@ void wbc1_original_encrypt_block(WBC1OriginalCipher *cipher, const uint8_t *plai
     
     /* Process each BYTE of the key (byte-based algorithm for 8× speedup) */
     for (int byte_idx = 0; byte_idx < cipher->key_len_bytes; byte_idx++) {
-        /* Step 1: Get key byte and select operation directly */
+        /* Step 1: Get key byte, mix it, and select operation */
         uint8_t key_byte = cipher->key[byte_idx];
-        int op_id = key_byte % NUM_OPERATIONS;  /* Direct mapping: key byte → operation ID */
+        uint8_t mixed_byte = mix_key_byte(key_byte);  /* Mix to improve bit sensitivity */
+        int op_id = mixed_byte % NUM_OPERATIONS;  /* Mapping: mixed byte → operation ID */
         
         /* Step 2: Apply selected operation */
         apply_operation(cipher, ciphertext, op_id, 0);
@@ -401,9 +423,10 @@ void wbc1_original_decrypt_block(WBC1OriginalCipher *cipher, const uint8_t *ciph
         /* Step 1: Reverse cyclic shift */
         cyclic_bitwise_shift(plaintext, cipher->block_size_bytes, -cipher->cube_d);
         
-        /* Step 2: Get key byte and select operation */
+        /* Step 2: Get key byte, mix it, and select operation */
         uint8_t key_byte = cipher->key[byte_idx];
-        int op_id = key_byte % NUM_OPERATIONS;  /* Direct mapping: key byte → operation ID */
+        uint8_t mixed_byte = mix_key_byte(key_byte);  /* Mix to improve bit sensitivity */
+        int op_id = mixed_byte % NUM_OPERATIONS;  /* Mapping: mixed byte → operation ID */
         
         /* Step 3: Apply inverse operation */
         apply_operation(cipher, plaintext, op_id, 1);
