@@ -372,16 +372,16 @@ void wbc1_original_free(WBC1OriginalCipher *cipher) {
     memset(cipher, 0, sizeof(WBC1OriginalCipher));
 }
 
-/* Encrypt single block using original algorithm */
+/* Encrypt single block using original algorithm (BYTE-BASED) */
 void wbc1_original_encrypt_block(WBC1OriginalCipher *cipher, const uint8_t *plaintext, uint8_t *ciphertext) {
     /* Copy plaintext to ciphertext (working buffer) */
     memcpy(ciphertext, plaintext, cipher->block_size_bytes);
     
-    /* Process each bit of the key */
-    for (int bit_idx = 0; bit_idx < cipher->key_len_bits; bit_idx++) {
-        /* Step 1: Get key bit and select operation */
-        int key_bit = get_key_bit(cipher->key, bit_idx, cipher->key_len_bytes);
-        int op_id = key_bit % NUM_OPERATIONS;  /* In real implementation: use key_bit to index table */
+    /* Process each BYTE of the key (byte-based algorithm for 8× speedup) */
+    for (int byte_idx = 0; byte_idx < cipher->key_len_bytes; byte_idx++) {
+        /* Step 1: Get key byte and select operation directly */
+        uint8_t key_byte = cipher->key[byte_idx];
+        int op_id = key_byte % NUM_OPERATIONS;  /* Direct mapping: key byte → operation ID */
         
         /* Step 2: Apply selected operation */
         apply_operation(cipher, ciphertext, op_id, 0);
@@ -391,19 +391,19 @@ void wbc1_original_encrypt_block(WBC1OriginalCipher *cipher, const uint8_t *plai
     }
 }
 
-/* Decrypt single block (reverse process) */
+/* Decrypt single block (reverse process - BYTE-BASED) */
 void wbc1_original_decrypt_block(WBC1OriginalCipher *cipher, const uint8_t *ciphertext, uint8_t *plaintext) {
     /* Copy ciphertext to plaintext (working buffer) */
     memcpy(plaintext, ciphertext, cipher->block_size_bytes);
     
-    /* Process key bits in reverse order */
-    for (int bit_idx = cipher->key_len_bits - 1; bit_idx >= 0; bit_idx--) {
+    /* Process key BYTES in reverse order */
+    for (int byte_idx = cipher->key_len_bytes - 1; byte_idx >= 0; byte_idx--) {
         /* Step 1: Reverse cyclic shift */
         cyclic_bitwise_shift(plaintext, cipher->block_size_bytes, -cipher->cube_d);
         
-        /* Step 2: Get key bit and select operation */
-        int key_bit = get_key_bit(cipher->key, bit_idx, cipher->key_len_bytes);
-        int op_id = key_bit % NUM_OPERATIONS;
+        /* Step 2: Get key byte and select operation */
+        uint8_t key_byte = cipher->key[byte_idx];
+        int op_id = key_byte % NUM_OPERATIONS;  /* Direct mapping: key byte → operation ID */
         
         /* Step 3: Apply inverse operation */
         apply_operation(cipher, plaintext, op_id, 1);
@@ -773,6 +773,64 @@ static void print_hex(const uint8_t *data, int len, int max_bytes) {
     }
     if (len > max_bytes) printf("...\n");
     else if (len % 32 != 0) printf("\n");
+}
+
+/* ========================================
+ * Key and Operation Display Functions
+ * ======================================== */
+
+/* Display key in hex format */
+static void print_key_hex(const uint8_t *key, int key_len) {
+    printf("\n");
+    printf("====================================================================================================\n");
+    printf("Generated key (hex) / Сгенерированный ключ (hex)\n");
+    printf("====================================================================================================\n");
+    for (int i = 0; i < key_len; i++) {
+        printf("%02x", key[i]);
+        if ((i + 1) % 32 == 0) {
+            printf("\n");
+        } else if ((i + 1) % 8 == 0) {
+            printf(" ");
+        }
+    }
+    if (key_len % 32 != 0) printf("\n");
+    printf("====================================================================================================\n");
+    printf("\n");
+}
+
+/* Display key-to-operation mapping */
+static void print_key_operation_mapping(WBC1OriginalCipher *cipher, int show_count) {
+    printf("\n");
+    printf("====================================================================================================\n");
+    printf("Key-to-Operation Mapping / Соответствие байтов ключа операциям\n");
+    printf("Format: Key[N]: ASCII Hex → Operation ID: (type, params) description\n");
+    printf("====================================================================================================\n");
+    
+    if (show_count > cipher->key_len_bytes) {
+        show_count = cipher->key_len_bytes;
+    }
+    
+    for (int i = 0; i < show_count; i++) {
+        uint8_t key_byte = cipher->key[i];
+        int op_id = key_byte % NUM_OPERATIONS;
+        Operation *op = &cipher->operations[op_id];
+        
+        /* ASCII character if printable, otherwise '.' */
+        char ascii_char = (key_byte >= 32 && key_byte <= 126) ? key_byte : '.';
+        
+        printf("Key[%3d]: %c 0x%02X → Op %3d: ", i, ascii_char, key_byte, op_id);
+        
+        if (strcmp(op->type, "dynamic") == 0) {
+            printf("(dynamic, '%s', chain=%d ops) %s\n", 
+                   op->param1, op->chain_length, op->desc);
+        } else {
+            printf("(%s, '%s', '%s') %s\n",
+                   op->type, op->param1, op->param2, op->desc);
+        }
+    }
+    
+    printf("====================================================================================================\n");
+    printf("\n");
 }
 
 /* Print operations table */
@@ -1210,8 +1268,15 @@ int main(int argc, char *argv[]) {
             parallel_original_encrypt(&cipher, NULL, 0, &dummy_cipher, &dummy_len);
         }
     } else if (task == 2) {
-        /* Print operations table */
+        /* Print operations table with key mapping */
         if (rank == 0) {
+            /* Display key in hex format */
+            print_key_hex(key, key_len);
+            
+            /* Display key-to-operation mapping (first 32 bytes) */
+            print_key_operation_mapping(&cipher, 32);
+            
+            /* Display operations table */
             print_operations_table(&cipher);
         }
     }
