@@ -240,20 +240,20 @@ BIN_ORIGINAL_CACHED = wbc1_original_cached
 original-cached: $(BIN_ORIGINAL_CACHED)
 
 $(BIN_ORIGINAL_CACHED): $(SRC_ORIGINAL_CACHED)
-$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	$(MPICC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 # Test original cached version
 test-original-cached: $(BIN_ORIGINAL_CACHED)
-@echo "========================================"
-@echo "Testing ORIGINAL CACHED Algorithm Version"
-@echo "========================================"
-@echo ""
-@echo "Test 1: Text encryption with 32-bit blocks (cached)"
-mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 32
-@echo ""
-@echo "Test 2: Text encryption with 128-bit blocks (cached)"
-mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 128
-@echo ""
-@echo "Test 3: Print operations table"
-mpirun --oversubscribe -n 1 ./$(BIN_ORIGINAL_CACHED) 2 256 0 128
-@echo ""
+	@echo "========================================"
+	@echo "Testing ORIGINAL CACHED Algorithm Version"
+	@echo "========================================"
+	@echo ""
+	@echo "Test 1: Text encryption with 32-bit blocks (cached)"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 32
+	@echo ""
+	@echo "Test 2: Text encryption with 128-bit blocks (cached)"
+	mpirun --oversubscribe -n $(NUM_PROCS) ./$(BIN_ORIGINAL_CACHED) 0 256 0 128
+	@echo ""
+	@echo "Test 3: Print operations table"
+	mpirun --oversubscribe -n 1 ./$(BIN_ORIGINAL_CACHED) 2 256 0 128
+	@echo ""
