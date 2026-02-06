@@ -1052,10 +1052,14 @@ int main(int argc, char *argv[]) {
         if (rank == 0 && mode == 1 && data_kb > 1000) {
             int block_size_bytes = block_size_bits / 8;
             long long estimated_blocks = ((long long)data_kb * 1024) / block_size_bytes;
-            long long estimated_ops = estimated_blocks * key_size;
+            /* BYTE-BASED algorithm: operations = blocks × key_bytes (not key_bits!) */
+            int key_bytes = key_size / 8;  /* 256 bits = 32 bytes */
+            long long estimated_ops = estimated_blocks * key_bytes;
             printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
             printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
-            printf("  Estimated operations: %.2f billion (block × key_bits)\n", estimated_ops / 1e9);
+            printf("  Estimated operations: %.2f million (blocks × key_bytes)\n", estimated_ops / 1e6);
+            printf("  With byte-based algorithm: %d operations per block\n", key_bytes);
+            printf("  Estimated processing time: ~%.1f seconds\n", (estimated_ops / 1e6) * 0.003);
             printf("  This may take several minutes with this algorithm.\n");
             printf("  Это может занять несколько минут с этим алгоритмом.\n");
             printf("  Consider using enhanced versions for large data.\n");
@@ -1158,10 +1162,14 @@ int main(int argc, char *argv[]) {
         if (rank == 0 && data_kb > 100) {
             int block_size_bytes = block_size_bits / 8;
             long long estimated_blocks = ((long long)data_kb * 1024) / block_size_bytes;
-            long long estimated_ops = estimated_blocks * key_size;
+            /* BYTE-BASED algorithm: operations = blocks × key_bytes (not key_bits!) */
+            int key_bytes = key_size / 8;  /* 256 bits = 32 bytes */
+            long long estimated_ops = estimated_blocks * key_bytes;
             printf("\n⚠ Performance Warning / Предупреждение о производительности:\n");
             printf("  Data size: %d KB (~%lld blocks)\n", data_kb, estimated_blocks);
-            printf("  Estimated operations: %.2f billion (blocks × key_bits)\n", estimated_ops / 1e9);
+            printf("  Estimated operations: %.2f million (blocks × key_bytes)\n", estimated_ops / 1e6);
+            printf("  With byte-based algorithm: %d operations per block\n", key_bytes);
+            printf("  Estimated processing time: ~%.1f seconds\n", (estimated_ops / 1e6) * 0.003);
             printf("  Processing may take a while...\n");
             printf("  Обработка может занять некоторое время...\n\n");
         }
