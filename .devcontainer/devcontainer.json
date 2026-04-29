@@ -1,0 +1,11 @@
+{
+  "name": "WBC Dev",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ]
+    }
+  }
+}
