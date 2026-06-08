@@ -83,6 +83,38 @@ Parallel implementation of the WBC1 (White-Box Cipher 1) block cipher algorithm 
    mpirun -n 4 ./wbc1_parallel_cached 1 16
    ```
 
+### CUDA Variant (WBC0)
+
+Separate CUDA-based file is available: `wbc0_original_parallel_cuda.cu`.
+
+1. **Install CUDA Toolkit (nvcc):**
+   ```bash
+   # Ubuntu/Debian (example)
+   sudo apt-get install nvidia-cuda-toolkit
+   ```
+
+2. **Build CUDA binary:**
+   ```bash
+   make wbc0-cuda
+   ```
+
+3. **Run CUDA variant:**
+   ```bash
+   mpirun -n 1 ./wbc0_original_parallel_cuda 1 256 0 0 1 1000 42 300
+   ```
+
+4. **Quick CUDA test target:**
+   ```bash
+   make test-wbc0-cuda
+   ```
+
+Notes:
+- If CUDA runtime/device is unavailable, the binary prints that CPU fallback is used.
+- If `nvcc` is missing, install CUDA Toolkit or set custom compiler path:
+  ```bash
+  make wbc0-cuda NVCC=/usr/local/cuda/bin/nvcc
+  ```
+
 ## Algorithm Modes
 
 Both Python and C implementations support two algorithm modes:

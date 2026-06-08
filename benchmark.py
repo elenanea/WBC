@@ -1,98 +1,48 @@
-#!/usr/bin/env python3
-"""
-Benchmark script for WBC1 parallel cipher.
-Run with: mpiexec -n <num_processes> python3 benchmark.py
-"""
+import subprocess
+import re
 
-from mpi4py import MPI
-from wbc1_parallel import ParallelWBC1
-import numpy as np
-
-
-def benchmark(num_processes, data_sizes_kb):
-    """Run benchmarks with different data sizes."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    
-    if rank == 0:
-        print("=" * 70)
-        print(f"WBC1 Parallel Cipher Benchmark")
-        print(f"Number of MPI processes: {num_processes}")
-        print("=" * 70)
-        print()
-    
-    # Configuration
-    key = b"BenchmarkKey1234"
-    cipher = ParallelWBC1(key, block_size=16, num_rounds=16)
-    
-    for size_kb in data_sizes_kb:
-        size_bytes = size_kb * 1024
-        
-        if rank == 0:
-            # Generate test data
-            data = bytes([i % 256 for i in range(size_bytes)])
-            num_blocks = (len(data) + 15) // 16
+def run_benchmark(n):
+    results = []
+    for i in range(1, 5):
+        try:
+            # Using printf '3\n1\n6\n' as specified in the prompt
+            cmd = f"printf '3\\n1\\n6\\n' | timeout 120 mpirun --allow-run-as-root -n {n} ./wbc1_cascade_mpi --single 2>/dev/null"
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = process.communicate()
             
-            print(f"Data size: {size_kb} KB ({num_blocks} blocks)")
-        else:
-            data = None
-        
-        # Warm up
-        if rank == 0:
-            warmup_data = b"warmup" * 100
-        else:
-            warmup_data = None
-        cipher.encrypt(warmup_data)
-        
-        # Benchmark encryption with MPI.Wtime()
-        comm.Barrier()  # Synchronize all processes
-        t0 = MPI.Wtime()
-        ciphertext = cipher.encrypt(data)
-        comm.Barrier()
-        encryption_time = MPI.Wtime() - t0
-        
-        # Benchmark decryption with MPI.Wtime()
-        comm.Barrier()
-        t0 = MPI.Wtime()
-        decrypted = cipher.decrypt(ciphertext)
-        comm.Barrier()
-        decryption_time = MPI.Wtime() - t0
-        
-        if rank == 0:
-            # Calculate throughput
-            enc_throughput = size_kb / encryption_time
-            dec_throughput = size_kb / decryption_time
-            
-            print(f"  Encryption time:   {encryption_time:.6f} s")
-            print(f"  Encryption speed:  {enc_throughput:.2f} KB/s")
-            print(f"  Decryption time:   {decryption_time:.6f} s")
-            print(f"  Decryption speed:  {dec_throughput:.2f} KB/s")
-            print(f"  Total time:        {encryption_time + decryption_time:.6f} s")
-            
-            # Verify correctness
-            if data == decrypted:
-                print(f"  Verification:      ✓ PASSED")
-            else:
-                print(f"  Verification:      ✗ FAILED")
-            print()
+            for line in stdout.splitlines():
+                line = line.strip()
+                if line.startswith('9765.62'):
+                    parts = line.split()
+                    if len(parts) >= 7:
+                        # size, enc_s, enc_kbs, dec_kbs, enc_mbps, dec_mbps, status
+                        res = {
+                            'n': n,
+                            'r': i,
+                            'enc_kbs': float(parts[2]),
+                            'dec_kbs': float(parts[3]),
+                            'enc_mbps': float(parts[4]),
+                            'dec_mbps': float(parts[5]),
+                            'status': parts[6]
+                        }
+                        results.append(res)
+                        print(f"n{n} R{i} {res['enc_kbs']} {res['dec_kbs']} {res['enc_mbps']} {res['dec_mbps']} {res['status']}")
+                        break
+        except Exception as e:
+            print(f"Error in n={n} R{i}: {e}")
+    return results
 
+res_n1 = run_benchmark(1)
+res_n2 = run_benchmark(2)
 
-def main():
-    """Main benchmark function."""
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
-    
-    # Test with different data sizes
-    data_sizes_kb = [1, 10, 50, 100, 500]  # KB
-    
-    benchmark(size, data_sizes_kb)
-    
-    if rank == 0:
-        print("=" * 70)
-        print("Benchmark completed successfully!")
-        print("=" * 70)
+if res_n1:
+    avg_n1 = sum(r['enc_kbs'] for r in res_n1) / len(res_n1)
+    print(f"Average enc_kbs for n=1: {avg_n1:.2f}")
+else:
+    print("No data for n=1")
 
-
-if __name__ == "__main__":
-    main()
+if res_n2:
+    avg_n2 = sum(r['enc_kbs'] for r in res_n2) / len(res_n2)
+    print(f"Average enc_kbs for n=2: {avg_n2:.2f}")
+else:
+    print("No data for n=2")

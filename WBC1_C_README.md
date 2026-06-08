@@ -92,6 +92,29 @@ mpicc -O3 -Wall -std=c99 -o wbc1_parallel wbc1_parallel.c -lssl -lcrypto -lm
 mpicc -O3 -Wall -std=c99 -o wbc1_parallel_cached wbc1_parallel_cached.c -lssl -lcrypto -lm
 ```
 
+### CUDA Variant (WBC0-based)
+
+An experimental CUDA-enabled variant is available in `wbc0_original_parallel_cuda.cu`.
+
+```bash
+# Build CUDA variant (requires nvcc)
+make wbc0-cuda
+
+# Run CUDA variant (statistical mode example)
+mpirun -n 1 ./wbc0_original_parallel_cuda 1 256 0 0 1 1000 42 300
+
+# Run predefined CUDA tests
+make test-wbc0-cuda
+```
+
+Notes:
+- If CUDA runtime/device is not available, the program prints CPU fallback status and continues on CPU.
+- If `nvcc` is not found, install CUDA Toolkit or pass compiler path explicitly:
+
+```bash
+make wbc0-cuda NVCC=/usr/local/cuda/bin/nvcc
+```
+
 ## Usage
 
 ### Command-line Syntax
@@ -120,6 +143,38 @@ mpirun -n 8 ./wbc1_parallel 0 32
 # High security: Mode 1 with 32 rounds
 mpirun -n 4 ./wbc1_parallel_cached 1 32
 ```
+
+#### Original Variants (wbc0/wbc1/wbc2)
+
+For original executables, use the full argument list:
+
+```bash
+mpirun -n <num_processes> ./wbcX_original_parallel <algorithm_mode> <key_bits> <key_source> <block_size_bits> <task> <data_kb>
+```
+
+Where:
+- `algorithm_mode`: `0` (simplified) or `1` (full)
+- `key_bits`: typically `256`
+- `key_source`: compatibility parameter (usually `0`)
+- `block_size_bits`: `0` enables automatic block size selection
+- `task`: `0` text mode, `1` statistical mode (uses `data_kb`)
+- `data_kb`: input size in KB for `task=1`
+
+Examples:
+
+```bash
+# 1000 KB statistical run
+mpirun -n 1 ./wbc0_original_parallel 0 256 0 0 1 1000
+mpirun -n 1 ./wbc1_original_parallel 0 256 0 0 1 1000
+mpirun -n 1 ./wbc2_original_parallel 0 256 0 0 1 1000
+
+# 100000 KB statistical run
+mpirun -n 1 ./wbc0_original_parallel 0 256 0 0 1 100000
+mpirun -n 1 ./wbc1_original_parallel 0 256 0 0 1 100000
+mpirun -n 1 ./wbc2_original_parallel 0 256 0 0 1 100000
+```
+
+Note: the previous 10MB (`10000 KB`) clamp in original variants has been removed.
 
 #### Testing
 ```bash

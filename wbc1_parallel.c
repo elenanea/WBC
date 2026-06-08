@@ -1396,23 +1396,26 @@ int main(int argc, char **argv) {
     }
     
     if (rank == 0) {
-        printf("=== Parallel WBC1 Cipher (C Implementation) ===\n");
-        printf("Number of MPI processes: %d\n", size);
-        printf("Algorithm mode: %s\n", algorithm_mode == MODE_FULL ? "Full (5 operations)" : "Simplified (2 operations)");
-        printf("Key size: %d bits (%d bytes)\n", key_bits, key_len);
-        printf("Block size: %d bytes\n", BLOCK_SIZE);
-        printf("Number of rounds: %d\n", num_rounds);
-        printf("Task: %s\n", task == 0 ? "Text encryption" : "Statistical analysis");
+        printf("======================================================================\n");
+        printf("ПАРАЛЛЕЛЬНЫЙ ШИФР WBC1 / PARALLEL WBC1 CIPHER (C Implementation)\n");
+        printf("======================================================================\n");
+        printf("Количество MPI процессов / MPI processes: %d\n", size);
+        printf("Режим / Mode: %s\n", algorithm_mode == MODE_FULL ? "1 (Full - 5 операций / operations)" : "0 (Simplified - 2 операции / operations)");
+        printf("Размер ключа / Key size: %d бит / bits (%d байт / bytes)\n", key_bits, key_len);
+        printf("Размер блока / Block size: %d байт / bytes\n", BLOCK_SIZE);
+        printf("Количество раундов / Rounds: %d\n", num_rounds);
+        printf("Задача / Task: %s\n", task == 0 ? "Шифрование текста / Text encryption" : "Статистический анализ / Statistical analysis");
         if (task == 1) {
-            printf("Data size: %d KB (%d bytes)\n", data_kb, plain_len);
+            printf("Размер данных / Data size: %d KB (%d байт / bytes)\n", data_kb, plain_len);
         }
-        printf("\nOriginal plaintext length: %d bytes\n", plain_len);
+        printf("======================================================================\n");
+        printf("\nДлина открытого текста / Original plaintext length: %d байт / bytes\n", plain_len);
         if (task == 0 && plain_len <= 200) {
-            printf("Original plaintext: %.*s\n\n", plain_len, plaintext);
+            printf("Открытый текст / Original plaintext: %.*s\n\n", plain_len, plaintext);
         } else if (task == 0) {
-            printf("Original plaintext: %.80s...\n\n", plaintext);
+            printf("Открытый текст / Original plaintext: %.80s...\n\n", plaintext);
         } else {
-            printf("Original data (first 64 bytes, hex): ");
+            printf("Данные (первые 64 байта, hex) / Data (first 64 bytes, hex): ");
             for (int i = 0; i < 64 && i < plain_len; i++) {
                 printf("%02x", plaintext[i]);
             }
@@ -1487,37 +1490,38 @@ int main(int argc, char **argv) {
         
         /* Verify */
         if (decrypted_len == plain_len && memcmp(plaintext, decrypted, plain_len) == 0) {
-            printf("✓ Encryption/Decryption successful - output matches input!\n");
+            printf("✓ Шифрование/Дешифрование успешно / Encryption/Decryption successful!\n");
+            printf("  Выход совпадает с входом / Output matches input!\n");
         } else {
-            printf("✗ Error: Decrypted text does not match original!\n");
+            printf("✗ Ошибка / Error: Расшифрованный текст не соответствует оригиналу!\n");
+            printf("  Decrypted text does not match original!\n");
         }
         
         /* Statistical analysis for task==1 */
         if (task == 1) {
             printf("\n");
-            printf("=" "==========================================\n");
-            printf("  CRYPTOGRAPHIC QUALITY ANALYSIS\n");
-            printf("=" "==========================================\n\n");
+            printf("======================================================================\n");
+            printf("  КРИПТОГРАФИЧЕСКИЙ АНАЛИЗ / CRYPTOGRAPHIC QUALITY ANALYSIS\n");
+            printf("======================================================================\n\n");
             
             // Shannon entropy
             double entropy_plain = shannon_entropy(plaintext, plain_len);
             double entropy_cipher = shannon_entropy(ciphertext, ciphertext_len);
-            printf("1. Shannon Entropy (Randomness Test)\n");
-            printf("   ────────────────────────────────\n");
-            printf("   Plaintext:   %.6f bits/byte\n", entropy_plain);
-            printf("   Ciphertext:  %.6f bits/byte", entropy_cipher);
-            if (entropy_cipher >= 7.9) {
-                printf("  ✓ EXCELLENT (≥7.9 expected)\n");
-            } else if (entropy_cipher >= 7.5) {
-                printf("  ⚠ ACCEPTABLE (7.5-7.9)\n");
-            } else {
-                printf("  ✗ POOR (<7.5)\n");
-            }
+            printf("1. Энтропия Шеннона / Shannon Entropy:\n");
+            printf("   Открытый текст / Plaintext:  %.4f бит/байт\n", entropy_plain);
+            printf("   Шифртекст / Ciphertext:      %.4f бит/байт\n", entropy_cipher);
+            printf("   (Идеально / Ideal: 8.0 бит/байт)\n");
+            
+            // Frequency test
+            double freq_mean, freq_std, freq_chi;
+            frequency_test(ciphertext, ciphertext_len, &freq_mean, &freq_std, &freq_chi);
+            printf("\n2. Частотный тест / Frequency Test:\n");
+            printf("   Среднее / Mean:        %.2f\n", freq_mean);
+            printf("   Ст. откл. / Std dev:   %.2f\n", freq_std);
+            printf("   Хи-квадрат / Chi-sq:   %.2f\n", freq_chi);
             
             // Avalanche test
-            printf("\n2. Avalanche Effect (Bit Diffusion Test)\n");
-            printf("   ────────────────────────────────────\n");
-            printf("   Testing: 1-bit input change → output bit changes\n");
+            printf("\n3. Лавинный эффект / Avalanche Effect:\n");
             double avalanche_results[100];
             avalanche_test(&cipher, 100, avalanche_results);
             
@@ -1535,59 +1539,71 @@ int main(int argc, char **argv) {
             }
             double av_std = sqrt(av_var / 100);
             
-            printf("   Mean:        %.2f%%", av_mean);
-            if (av_mean >= 45.0 && av_mean <= 55.0) {
-                printf("  ✓ EXCELLENT (45-55%% expected)\n");
-            } else if (av_mean >= 40.0 && av_mean <= 60.0) {
-                printf("  ⚠ ACCEPTABLE (40-60%%)\n");
-            } else {
-                printf("  ✗ POOR (far from 50%%)\n");
-            }
-            printf("   Std Dev:     %.2f%%\n", av_std);
-            printf("   Range:       %.2f%% - %.2f%%\n", av_min, av_max);
-            printf("   Iterations:  100 tests\n");
-            
-            // Frequency test
-            double freq_mean, freq_std, freq_chi;
-            frequency_test(ciphertext, ciphertext_len, &freq_mean, &freq_std, &freq_chi);
-            printf("\n3. Frequency Distribution Analysis\n");
-            printf("   ────────────────────────────────\n");
-            printf("   Mean frequency:   %.2f bytes/value\n", freq_mean);
-            printf("   Std deviation:    %.2f\n", freq_std);
-            printf("   Chi-square:       %.2f", freq_chi);
-            if (freq_chi < 300) {
-                printf("  ✓ GOOD (uniform distribution)\n");
-            } else {
-                printf("  ⚠ Check distribution\n");
-            }
+            printf("   Среднее изменение битов / Mean bit flip: %.2f%%\n", av_mean);
+            printf("   Ст. откл. / Std dev:                     %.2f%%\n", av_std);
+            printf("   Диапазон / Range: [%.2f%%, %.2f%%]\n", av_min, av_max);
+            printf("   (Идеально / Ideal: ~50%%)\n");
             
             // Correlation - compare plaintext with ciphertext (should be low)
             double corr = correlation_test(plaintext, ciphertext, plain_len < ciphertext_len ? plain_len : ciphertext_len);
-            printf("\n4. Correlation Test (Independence)\n");
-            printf("   ────────────────────────────────\n");
-            printf("   Plaintext-Ciphertext: %.6f", corr);
-            if (fabs(corr) < 0.1) {
-                printf("  ✓ EXCELLENT (<0.1 expected)\n");
-            } else if (fabs(corr) < 0.3) {
-                printf("  ⚠ ACCEPTABLE (0.1-0.3)\n");
-            } else {
-                printf("  ✗ POOR (>0.3, shows correlation)\n");
+            printf("\n4. Корреляция / Correlation:\n");
+            printf("   Корреляция открытый-шифр / PT-CT: %.6f\n", corr);
+            printf("   (Идеально / Ideal: ~0.0)\n");
+            
+            // Differential test - key sensitivity
+            printf("\n5. Дифференциальный тест / Differential Test:\n");
+            printf("   Тестирование чувствительности к изменению ключа...\n");
+            printf("   Testing key sensitivity to single bit flips...\n");
+            
+            long long total_flips = 0;
+            // Only compare actual block size that gets encrypted (BLOCK_SIZE = 16 bytes)
+            int test_block_size = BLOCK_SIZE;
+            int total_bits = test_block_size * 8;
+            
+            // Test all 256 bits of the key (32 bytes * 8 bits)
+            for (int bit_pos = 0; bit_pos < 256; bit_pos++) {
+                // Create modified key with single bit flipped
+                unsigned char modified_key[32];
+                memcpy(modified_key, key, 32);
+                modified_key[bit_pos / 8] ^= (1 << (bit_pos % 8));
+                
+                // Create cipher with modified key
+                WBC1Cipher modified_cipher;
+                wbc1_init(&modified_cipher, modified_key, 32, num_rounds, algorithm_mode);
+                
+                // Encrypt single block with modified key
+                unsigned char modified_ciphertext[BLOCK_SIZE];
+                unsigned char test_block[BLOCK_SIZE];
+                memcpy(test_block, plaintext, (plain_len < BLOCK_SIZE) ? plain_len : BLOCK_SIZE);
+                if (plain_len < BLOCK_SIZE) {
+                    memset(test_block + plain_len, 0, BLOCK_SIZE - plain_len);
+                }
+                
+                wbc1_encrypt_block(&modified_cipher, test_block, modified_ciphertext);
+                
+                // Count bit differences in encrypted block (only BLOCK_SIZE bytes)
+                for (int byte_idx = 0; byte_idx < test_block_size; byte_idx++) {
+                    unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
+                    // Count set bits in diff
+                    while (diff) {
+                        total_flips += diff & 1;
+                        diff >>= 1;
+                    }
+                }
+                
+                wbc1_free(&modified_cipher);
             }
             
-            // Performance summary
-            double throughput_enc = (plain_len / 1024.0) / enc_time;
-            double throughput_dec = (decrypted_len / 1024.0) / dec_time;
-            printf("\n5. Performance Metrics\n");
-            printf("   ───────────────────\n");
-            printf("   Encryption:  %.2f KB/s (%.6f sec for %d KB)\n", 
-                   throughput_enc, enc_time, plain_len/1024);
-            printf("   Decryption:  %.2f KB/s (%.6f sec for %d KB)\n",
-                   throughput_dec, dec_time, decrypted_len/1024);
-            printf("   MPI Processes: %d\n", size);
+            // Match Python formula: flips / (256 * total_bits)
+            // This represents: bits_changed / (number_of_key_bits * output_bits)
+            double diff_effect = (double)total_flips / (256.0 * (double)total_bits);
+            printf("   Изменение выходных битов / Output bit changes: %.2f%%\n", diff_effect * 100.0);
+            printf("   (Идеально / Ideal: ~50%% изменений при 1-битном изменении ключа)\n");
             
-            printf("\n" "==========================================\n");
-            printf("  ANALYSIS COMPLETE\n");
-            printf("=" "==========================================\n");
+            printf("\n");
+            printf("======================================================================\n");
+            printf("АНАЛИЗ ЗАВЕРШЕН / ANALYSIS COMPLETED\n");
+            printf("======================================================================\n");
         }
         
         free(ciphertext);

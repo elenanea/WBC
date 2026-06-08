@@ -1156,6 +1156,211 @@ double correlation_test(const uint8_t *data1, const uint8_t *data2, int len) {
     return numerator / sqrt(denom1 * denom2);
 }
 
+static int cmp_double_asc(const void *a, const void *b) {
+    const double da = *(const double *)a;
+    const double db = *(const double *)b;
+    return (da > db) - (da < db);
+}
+
+static double aggregate_bench_time_local(const double *arr, int n, int trim_outliers) {
+    if (!arr || n <= 0) return 0.0;
+    if (!trim_outliers || n < 5) {
+        double s = 0.0;
+        for (int i = 0; i < n; i++) s += arr[i];
+        return s / (double)n;
+    }
+
+    double tmp[64];
+    int m = (n > 64) ? 64 : n;
+    for (int i = 0; i < m; i++) tmp[i] = arr[i];
+    qsort(tmp, m, sizeof(double), cmp_double_asc);
+
+    int lo = 1, hi = m - 1;
+    if (hi <= lo) {
+        double s = 0.0;
+        for (int i = 0; i < m; i++) s += tmp[i];
+        return s / (double)m;
+    }
+
+    double s = 0.0;
+    int cnt = 0;
+    for (int i = lo; i < hi; i++) {
+        s += tmp[i];
+        cnt++;
+    }
+    return (cnt > 0) ? (s / (double)cnt) : tmp[m / 2];
+}
+
+static double read_cpu_mhz(void) {
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f) return 0.0;
+
+    char line[256];
+    double mhz = 0.0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "cpu MHz", 7) == 0) {
+            char *p = strchr(line, ':');
+            if (p) {
+                mhz = atof(p + 1);
+                if (mhz > 0.0) break;
+            }
+        }
+    }
+    fclose(f);
+    return mhz;
+}
+
+static uint8_t *generate_random_bytes_local(int len) {
+    uint8_t *data = (uint8_t *)malloc((size_t)len);
+    if (!data) return NULL;
+
+    FILE *urandom = fopen("/dev/urandom", "rb");
+    if (urandom) {
+        size_t got = fread(data, 1, (size_t)len, urandom);
+        fclose(urandom);
+        if (got == (size_t)len) return data;
+    }
+
+    srand((unsigned int)time(NULL));
+    for (int i = 0; i < len; i++) data[i] = (uint8_t)(rand() & 0xFF);
+    return data;
+}
+
+static void benchmark_core(WBC1Cipher *cipher) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    static const int sizes_bytes_def[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000};
+    static const int sizes_bytes_1gb[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 1073741824};
+    const int *sizes_bytes = sizes_bytes_def;
+    int ns = (int)(sizeof(sizes_bytes_def) / sizeof(sizes_bytes_def[0]));
+    int repeats = 10;
+    int trim_outliers = 1;
+
+    {
+        const char *env = getenv("WBC_MPI_BENCH_1GB");
+        if (env && env[0] == '1') {
+            sizes_bytes = sizes_bytes_1gb;
+            ns = (int)(sizeof(sizes_bytes_1gb) / sizeof(sizes_bytes_1gb[0]));
+        }
+    }
+    double enc_kbs[16] = {0.0};
+    double dec_kbs[16] = {0.0};
+
+    if (rank == 0) {
+        printf("\nPerformance Benchmark / Бенчмарк производительности (MPI-aware):\n");
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        printf("  %10s  %10s  %14s  %14s  %12s  %12s  %14s  %14s  %s\n",
+               "Size (KB)", "Enc (s)", "Enc (KB/s)", "Dec (KB/s)",
+               "Enc (MB/s)", "Dec (MB/s)", "Enc (Mbit/s)", "Dec (Mbit/s)", "Integrity");
+        printf("  %s\n", "--------------------------------------------------------------------------------------------------------------");
+        printf("  Timing mode: legacy barrier/root\n");
+        printf("  Repeats: %d  |  Aggregation: %s\n", repeats, trim_outliers ? "trimmed mean" : "mean");
+    }
+
+    for (int si = 0; si < ns; si++) {
+        int size_bytes = sizes_bytes[si];
+        uint8_t *plain = NULL;
+        int all_ok = 1;
+
+        if (rank == 0) {
+            plain = generate_random_bytes_local(size_bytes);
+            if (!plain) all_ok = 0;
+        }
+
+        MPI_Bcast(&all_ok, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (!all_ok) {
+            if (rank == 0) fprintf(stderr, "Error: benchmark data allocation failed\n");
+            if (plain) free(plain);
+            break;
+        }
+
+        double enc_times[64] = {0.0};
+        double dec_times[64] = {0.0};
+
+        for (int r = 0; r < repeats; r++) {
+            uint8_t *enc = NULL;
+            uint8_t *dec = NULL;
+            int enc_len = 0;
+            int dec_len = 0;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+            double t0 = MPI_Wtime();
+            if (rank == 0) {
+                parallel_encrypt(cipher, plain, size_bytes, &enc, &enc_len);
+            } else {
+                parallel_encrypt(cipher, NULL, 0, &enc, &enc_len);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+            if (rank == 0) enc_times[r] = MPI_Wtime() - t0;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+            double t1 = MPI_Wtime();
+            if (rank == 0) {
+                parallel_decrypt(cipher, enc, enc_len, &dec, &dec_len);
+            } else {
+                parallel_decrypt(cipher, NULL, 0, &dec, &dec_len);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+            if (rank == 0) dec_times[r] = MPI_Wtime() - t1;
+
+            if (rank == 0) {
+                if (!dec || dec_len != size_bytes || memcmp(plain, dec, (size_t)size_bytes) != 0) {
+                    all_ok = 0;
+                }
+            }
+
+            if (enc) free(enc);
+            if (dec) free(dec);
+        }
+
+        if (rank == 0) {
+            double ea = aggregate_bench_time_local(enc_times, repeats, trim_outliers);
+            double da = aggregate_bench_time_local(dec_times, repeats, trim_outliers);
+
+            double size_kb = (double)size_bytes / 1024.0;
+            double enc_kb_s = size_kb / (ea > 0.0 ? ea : 1e-9);
+            double dec_kb_s = size_kb / (da > 0.0 ? da : 1e-9);
+            double enc_mb_s = ((double)size_bytes / 1e6) / (ea > 0.0 ? ea : 1e-9);
+            double dec_mb_s = ((double)size_bytes / 1e6) / (da > 0.0 ? da : 1e-9);
+
+            enc_kbs[si] = enc_kb_s;
+            dec_kbs[si] = dec_kb_s;
+
+            printf("  %10.2f  %10.5f  %14.2f  %14.2f  %12.4f  %12.4f  %14.4f  %14.4f  %s\n",
+                   size_kb, ea, enc_kb_s, dec_kb_s,
+                   enc_mb_s, dec_mb_s, enc_mb_s * 8.0, dec_mb_s * 8.0,
+                   all_ok ? "OK" : "FAIL");
+        }
+
+        if (plain) free(plain);
+    }
+
+    if (rank == 0) {
+        double cpu_mhz = read_cpu_mhz();
+        if (cpu_mhz > 0.0) {
+            printf("\n  --- Цикли / байт  (CPU: %.0f МГц) ---\n", cpu_mhz);
+            printf("  %10s  %8s  %8s  %12s  %12s  %10s  %10s\n",
+                   "Size (KB)", "Enc CPB", "Dec CPB", "E Cyc/blk", "D Cyc/blk", "E B/cycle", "D B/cycle");
+            printf("  %s\n", "--------------------------------------------------------------------------");
+            for (int si = 0; si < ns; si++) {
+                double ecpb = (enc_kbs[si] > 0.0) ? cpu_mhz * 1e6 / (enc_kbs[si] * 1024.0) : 0.0;
+                double dcpb = (dec_kbs[si] > 0.0) ? cpu_mhz * 1e6 / (dec_kbs[si] * 1024.0) : 0.0;
+                double size_kb = (double)sizes_bytes[si] / 1024.0;
+                printf("  %10.2f  %8.2f  %8.2f  %12.0f  %12.0f  %10.5f  %10.5f\n",
+                       size_kb, ecpb, dcpb,
+                       ecpb * (double)BLOCK_SIZE, dcpb * (double)BLOCK_SIZE,
+                       (ecpb > 0.0) ? 1.0 / ecpb : 0.0,
+                       (dcpb > 0.0) ? 1.0 / dcpb : 0.0);
+            }
+        } else {
+            printf("\n  CPB: частота CPU недоступна\n");
+        }
+        printf("\n");
+    }
+}
+
 /* ===== Main Test Function ===== */
 
 int main(int argc, char **argv) {
@@ -1179,11 +1384,69 @@ int main(int argc, char **argv) {
     /* Note: key_source is parsed for compatibility with Python interface but not used */
     /* C version always auto-generates keys based on key_bits parameter */
     int num_rounds = 16;
-    int task = 0;  /* 0=text encryption, 1=statistical analysis */
+    int task = 0;  /* 0=text encryption, 1=statistical analysis, 3=benchmark */
     int data_kb = 1;  /* Data size in KB for task=1 */
+    int use_named_cli = 0;
+    const char *custom_text = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "--", 2) == 0) {
+            use_named_cli = 1;
+            break;
+        }
+    }
     
     /* Parse command-line arguments */
-    if (argc >= 5) {
+    if (use_named_cli) {
+        task = -1;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--single") == 0 || strcmp(argv[i], "--once") == 0) {
+                /* Compatibility no-op */
+                continue;
+            }
+
+            if (strcmp(argv[i], "--task-encrypt") == 0 || strcmp(argv[i], "--encrypt") == 0) {
+                task = 0;
+            } else if (strcmp(argv[i], "--task-analysis") == 0 || strcmp(argv[i], "--analysis") == 0 ||
+                       strcmp(argv[i], "--stats") == 0 || strcmp(argv[i], "--task-stats") == 0) {
+                task = 1;
+            } else if (strcmp(argv[i], "--task-benchmark") == 0 || strcmp(argv[i], "--benchmark") == 0 ||
+                       strcmp(argv[i], "--bench") == 0) {
+                task = 3;
+            } else if ((strcmp(argv[i], "--task") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
+                const char *v = argv[++i];
+                if (strcmp(v, "0") == 0 || strcmp(v, "encrypt") == 0 || strcmp(v, "demo") == 0) task = 0;
+                else if (strcmp(v, "1") == 0 || strcmp(v, "analysis") == 0 || strcmp(v, "stats") == 0 ||
+                         strcmp(v, "stat") == 0) task = 1;
+                else if (strcmp(v, "3") == 0 || strcmp(v, "benchmark") == 0 || strcmp(v, "bench") == 0) task = 3;
+            } else if ((strcmp(argv[i], "--mode") == 0 || strcmp(argv[i], "-m") == 0) && i + 1 < argc) {
+                const char *v = argv[++i];
+                if (strcmp(v, "full") == 0 || strcmp(v, "1") == 0) algorithm_mode = MODE_FULL;
+                else if (strcmp(v, "simple") == 0 || strcmp(v, "simplified") == 0 || strcmp(v, "0") == 0)
+                    algorithm_mode = MODE_SIMPLIFIED;
+            } else if ((strcmp(argv[i], "--key-size") == 0 || strcmp(argv[i], "-k") == 0) && i + 1 < argc) {
+                key_bits = atoi(argv[++i]);
+            } else if ((strcmp(argv[i], "--rounds") == 0 || strcmp(argv[i], "-r") == 0) && i + 1 < argc) {
+                num_rounds = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+                data_kb = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--text") == 0 && i + 1 < argc) {
+                custom_text = argv[++i];
+            } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+                if (rank == 0) {
+                    printf("Usage (named): %s --task <encrypt|analysis|benchmark> [--mode full|simplified] [--key-size 256] [--rounds N] [--size KB] [--text STRING]\n", argv[0]);
+                    printf("Aliases: --task-encrypt, --task-analysis, --task-benchmark\n");
+                    printf("Compatibility: --single and --once are accepted as no-op flags\n");
+                    printf("Usage (legacy): %s <algorithm_mode> <key_bits> <key_source> <rounds> <task> [data_kb]\n", argv[0]);
+                }
+                MPI_Finalize();
+                return 0;
+            }
+        }
+
+        if (task < 0) task = 0;
+        if (data_kb < 1) data_kb = 1;
+    } else if (argc >= 5) {
         algorithm_mode = atoi(argv[1]);
         key_bits = atoi(argv[2]);
         /* argv[3] is key_source, parsed but unused - kept for Python compatibility */
@@ -1191,19 +1454,22 @@ int main(int argc, char **argv) {
         if (argc >= 6) {
             task = atoi(argv[5]);
         }
-        if (argc >= 7 && task == 1) {
+        if (argc >= 7 && (task == 1 || task == 3)) {
             data_kb = atoi(argv[6]);
         }
     } else if (rank == 0) {
-        printf("Usage: %s <algorithm_mode> <key_bits> <key_source> <rounds> <task> [data_kb]\n", argv[0]);
+        printf("Usage (named): %s --task <encrypt|analysis|benchmark> [--mode full|simplified] [--key-size 256] [--rounds N] [--size KB] [--text STRING]\n", argv[0]);
+        printf("Usage (legacy): %s <algorithm_mode> <key_bits> <key_source> <rounds> <task> [data_kb]\n", argv[0]);
         printf("  algorithm_mode: 0=simplified (2 ops), 1=full (5 ops)\n");
-        printf("  key_bits: key size in bits (128, 192, 256, etc.)\n");
-        printf("  key_source: 0=auto-generate, 1=user-provided (C version always auto-generates)\n");
-        printf("  rounds: number of encryption rounds\n");
-        printf("  task: 0=text encryption, 1=statistical analysis\n");
-        printf("  data_kb: data size in KB for task=1 (optional)\n\n");
-        printf("Example: mpirun -n 4 %s 1 256 0 32 0\n", argv[0]);
+        printf("  task: 0=text encryption, 1=statistical analysis, 3=benchmark\n");
+        printf("Example: mpirun -n 4 %s --task-benchmark --mode full --key-size 256 --rounds 16\n", argv[0]);
     }
+
+    if (algorithm_mode != MODE_SIMPLIFIED && algorithm_mode != MODE_FULL) {
+        algorithm_mode = MODE_FULL;
+    }
+    if (num_rounds < 1) num_rounds = 1;
+    if (num_rounds > MAX_ROUNDS) num_rounds = MAX_ROUNDS;
     
     /* Generate key based on key_bits */
     int key_len = key_bits / 8;
@@ -1257,9 +1523,13 @@ int main(int argc, char **argv) {
                 plaintext[i] = (uint8_t)rand();
             }
         }
+    } else if (task == 3) {
+        plain_len = 0;
+        plaintext = NULL;
     } else {
         /* Text encryption mode - use demo text */
-        const char *plaintext_str = "This is a demonstration of the WBC1 parallel cipher with dynamic Rubik's cube permutation operations. "
+        const char *plaintext_str = custom_text ? custom_text :
+                                   "This is a demonstration of the WBC1 parallel cipher with dynamic Rubik's cube permutation operations. "
                                    "The implementation supports both simplified (2 operations per round) and full (5 operations per round) algorithm modes. "
                                    "It uses MPI for distributed parallel processing across multiple nodes. ";
         
@@ -1286,21 +1556,23 @@ int main(int argc, char **argv) {
         printf("Block size: %d bytes\n", BLOCK_SIZE);
         printf("Number of rounds: %d\n", num_rounds);
         printf("Optimization: Pre-computed operation cache enabled\n");
-        printf("Task: %s\n", task == 0 ? "Text encryption" : "Statistical analysis");
+        printf("Task: %s\n", task == 0 ? "Text encryption" : (task == 1 ? "Statistical analysis" : "Benchmark"));
         if (task == 1) {
             printf("Data size: %d KB (%d bytes)\n", data_kb, plain_len);
         }
-        printf("\nOriginal plaintext length: %d bytes\n", plain_len);
-        if (task == 0 && plain_len <= 200) {
-            printf("Original plaintext: %.*s\n\n", plain_len, plaintext);
-        } else if (task == 0) {
-            printf("Original plaintext: %.80s...\n\n", plaintext);
-        } else {
-            printf("Original data (first 64 bytes, hex): ");
-            for (int i = 0; i < 64 && i < plain_len; i++) {
-                printf("%02x", plaintext[i]);
+        if (task != 3) {
+            printf("\nOriginal plaintext length: %d bytes\n", plain_len);
+            if (task == 0 && plain_len <= 200) {
+                printf("Original plaintext: %.*s\n\n", plain_len, plaintext);
+            } else if (task == 0) {
+                printf("Original plaintext: %.80s...\n\n", plaintext);
+            } else {
+                printf("Original data (first 64 bytes, hex): ");
+                for (int i = 0; i < 64 && i < plain_len; i++) {
+                    printf("%02x", plaintext[i]);
+                }
+                printf("...\n\n");
             }
-            printf("...\n\n");
         }
     }
     
@@ -1312,6 +1584,15 @@ int main(int argc, char **argv) {
     
     if (rank == 0) {
         printf("Cipher initialization time (with cache): %.6f seconds\n\n", init_time);
+    }
+
+    if (task == 3) {
+        benchmark_core(&cipher);
+        free(key);
+        free(plaintext);
+        wbc1_free(&cipher);
+        MPI_Finalize();
+        return 0;
     }
     
     /* Encrypt */
@@ -1464,10 +1745,67 @@ int main(int argc, char **argv) {
                 printf("  ✗ POOR (>0.3, shows correlation)\n");
             }
             
+            // Differential test - key sensitivity  
+            printf("\n5. Differential Test (Key Sensitivity)\n");
+            printf("   ────────────────────────────────────\n");
+            printf("   Testing: 1-bit key change → output bit changes\n");
+            
+            long long total_flips = 0;
+            // Only compare actual block size that gets encrypted (BLOCK_SIZE = 16 bytes)
+            int test_block_size = BLOCK_SIZE;
+            int total_bits = test_block_size * 8;
+            
+            // Test all 256 bits of the key (32 bytes * 8 bits)
+            for (int bit_pos = 0; bit_pos < 256; bit_pos++) {
+                // Create modified key with single bit flipped
+                unsigned char modified_key[32];
+                memcpy(modified_key, key, 32);
+                modified_key[bit_pos / 8] ^= (1 << (bit_pos % 8));
+                
+                // Create cipher with modified key
+                WBC1Cipher modified_cipher;
+                wbc1_init(&modified_cipher, modified_key, 32, num_rounds, algorithm_mode);
+                
+                // Encrypt single block with modified key
+                unsigned char modified_ciphertext[BLOCK_SIZE];
+                unsigned char test_block[BLOCK_SIZE];
+                memcpy(test_block, plaintext, (plain_len < BLOCK_SIZE) ? plain_len : BLOCK_SIZE);
+                if (plain_len < BLOCK_SIZE) {
+                    memset(test_block + plain_len, 0, BLOCK_SIZE - plain_len);
+                }
+                
+                wbc1_encrypt_block(&modified_cipher, test_block, modified_ciphertext);
+                
+                // Count bit differences in encrypted block (only BLOCK_SIZE bytes)
+                for (int byte_idx = 0; byte_idx < test_block_size; byte_idx++) {
+                    unsigned char diff = ciphertext[byte_idx] ^ modified_ciphertext[byte_idx];
+                    // Count set bits in diff
+                    while (diff) {
+                        total_flips += diff & 1;
+                        diff >>= 1;
+                    }
+                }
+                
+                wbc1_free(&modified_cipher);
+            }
+            
+            // Match Python formula: flips / (256 * total_bits)
+            // This represents: bits_changed / (number_of_key_bits * output_bits)
+            double diff_effect = (double)total_flips / (256.0 * (double)total_bits);
+            printf("   Mean:        %.2f%%", diff_effect * 100.0);
+            if (diff_effect * 100.0 >= 45.0 && diff_effect * 100.0 <= 55.0) {
+                printf("  ✓ EXCELLENT (45-55%% expected)\n");
+            } else if (diff_effect * 100.0 >= 40.0 && diff_effect * 100.0 <= 60.0) {
+                printf("  ⚠ ACCEPTABLE (40-60%%)\n");
+            } else {
+                printf("  ✗ POOR (far from 50%%)\n");
+            }
+            printf("   Key bits tested: 256\n");
+            
             // Performance summary
             double throughput_enc = (plain_len / 1024.0) / enc_time;
             double throughput_dec = (decrypted_len / 1024.0) / dec_time;
-            printf("\n5. Performance Metrics\n");
+            printf("\n6. Performance Metrics\n");
             printf("   ───────────────────\n");
             printf("   Encryption:  %.2f KB/s (%.6f sec for %d KB)\n", 
                    throughput_enc, enc_time, plain_len/1024);

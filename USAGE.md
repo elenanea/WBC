@@ -200,6 +200,43 @@ mpiexec --oversubscribe -n 2 python3 example_parallel.py
 mpiexec --oversubscribe -n 4 python3 example_parallel.py
 ```
 
+## CUDA Variant (WBC0)
+
+For CUDA-enabled experiments, use the separate binary based on `wbc0_original_parallel_cuda.cu`.
+
+### Build
+
+```bash
+make wbc0-cuda
+```
+
+If `nvcc` is not in PATH:
+
+```bash
+make wbc0-cuda NVCC=/usr/local/cuda/bin/nvcc
+```
+
+### Run
+
+```bash
+# Statistical mode (fixed seed + avalanche runs)
+mpirun -n 1 ./wbc0_original_parallel_cuda 1 256 0 0 1 1000 42 300
+
+# Encrypt/decrypt demo
+mpirun -n 1 ./wbc0_original_parallel_cuda 0 256 0 128
+```
+
+### CUDA test target
+
+```bash
+make test-wbc0-cuda
+```
+
+### Notes
+
+- If CUDA runtime/device is unavailable, the program automatically switches to CPU fallback.
+- The command-line interface is the same as `wbc0_original_parallel`.
+
 ## Performance Tips
 
 1. **Optimal Number of Processes:**
