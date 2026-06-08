@@ -1,0 +1,24 @@
+
+========================================
+  NIST SP800-22 Statistical Tests
+  Input: 528384 bytes = 4227072 bits
+========================================
+
+  Frequency (Monobit)                         p=0.527191  PASS ✓
+  Block Frequency (M=128)                     p=0.760333  PASS ✓
+  Runs                                        p=0.688008  PASS ✓
+  Longest Run (M=10000)                       p=0.612477  PASS ✓
+  Binary Matrix Rank (32x32)                  p=0.548724  PASS ✓
+  Cumulative Sums (forward)                   p=0.640821  PASS ✓
+  Cumulative Sums (backward)                  p=0.452265  PASS ✓
+  Non-overlapping Template (111111111)        p=0.157626  PASS ✓
+  Approximate Entropy (m=10)                  p=0.796402  PASS ✓
+  Serial δ1 (m=16)                           p=0.213589  PASS ✓
+  Serial δ2 (m=16)                           p=0.295579  PASS ✓
+  DFT (Spectral, N=1000)                      p=0.771671  PASS ✓
+
+----------------------------------------
+  Results: 12 PASS  0 FAIL  0 SKIP
+  (threshold: p >= 0.01)
+========================================
+

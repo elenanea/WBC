@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RubikCrypt — WBC Encryption</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b27;
+      --card:    #1e2435;
+      --border:  #2a3050;
+      --accent:  #6c63ff;
+      --accent2: #00d4aa;
+      --accent3: #ff6b35;
+      --text:    #e8eaf6;
+      --muted:   #7986cb;
+      --error:   #ef5350;
+      --success: #66bb6a;
+      --radius:  10px;
+    }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 20px; }
+
+    /* ── Header ── */
+    header { text-align: center; padding: 28px 0 36px; }
+    .logo-row { display: flex; align-items: center; justify-content: center; gap: 18px; }
+    .rubik-logo svg { width: 64px; height: 64px; filter: drop-shadow(0 0 12px #6c63ff88); }
+    .logo-text h1 { font-size: 2.6rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; letter-spacing: -1px; }
+    .logo-text .tagline { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+
+    .container { max-width: 1120px; margin: 0 auto; }
+
+    /* ── Algo grid ── */
+    .algo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 9px; margin-bottom: 8px; }
+    .algo-section-label { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 5px; margin-top: 4px; }
+    .algo-rows { margin-bottom: 24px; }
+    .algo-card { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); padding: 11px 13px; cursor: pointer; transition: border-color .2s, transform .1s; user-select: none; }
+    .algo-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .algo-card.selected { border-color: var(--accent); background: #232749; }
+    .algo-card .algo-id { font-weight: 700; font-size: 1rem; color: var(--accent); }
+    .algo-card .algo-type { font-size: 0.68rem; color: var(--accent3); font-weight: 600; letter-spacing: .5px; margin-top: 2px; }
+    .algo-card .algo-desc { font-size: 0.72rem; color: var(--muted); margin-top: 4px; line-height: 1.3; }
+
+    /* ── Mode tabs ── */
+    .tabs { display: flex; gap: 0; margin-bottom: 20px; }
+    .tab { padding: 10px 28px; border-radius: var(--radius) var(--radius) 0 0; background: var(--card); border: 2px solid var(--border); border-bottom: none; cursor: pointer; font-size: 0.95rem; color: var(--muted); transition: all .2s; }
+    .tab.active { background: var(--surface); color: var(--text); border-color: var(--accent); }
+
+    /* ── Panel ── */
+    .panel { background: var(--surface); border: 2px solid var(--border); border-radius: 0 var(--radius) var(--radius) var(--radius); padding: 24px; }
+
+    /* ── Settings row ── */
+    .settings-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; background: var(--card); border-radius: var(--radius); padding: 14px 16px; align-items: flex-end; }
+    .setting-item { display: flex; flex-direction: column; gap: 5px; }
+    .setting-item label { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+    .setting-item select, .setting-item input[type=range] { background: var(--bg); border: 1.5px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: 0.85rem; outline: none; cursor: pointer; min-width: 120px; }
+    .setting-item select:focus { border-color: var(--accent); }
+    .nprocs-row { display: flex; gap: 8px; align-items: center; }
+    .nprocs-val { font-weight: 700; color: var(--accent); font-size: 0.85rem; min-width: 24px; text-align: center; }
+    .setting-item input[type=range] { width: 100px; accent-color: var(--accent); padding: 2px 0; background: transparent; border: none; }
+
+    /* ── Key section ── */
+    .key-section { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 18px; }
+    .key-section label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 7px; font-weight: 600; }
+    .key-row { display: flex; gap: 8px; align-items: stretch; }
+    .key-row input { flex: 1; background: var(--bg); border: 1.5px solid var(--border); border-radius: 6px; color: var(--text); padding: 9px 12px; font-family: 'Courier New', monospace; font-size: 0.82rem; outline: none; transition: border-color .2s; }
+    .key-row input:focus { border-color: var(--accent); }
+    .btn { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.88rem; font-weight: 600; transition: opacity .2s, transform .1s; white-space: nowrap; }
+    .btn:hover { opacity: .85; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-primary   { background: var(--accent);  color: #fff; }
+    .btn-secondary { background: var(--card);    color: var(--text); border: 1.5px solid var(--border); }
+    .btn-success   { background: var(--accent2); color: #000; }
+    .key-info { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+
+    /* ── Input toggle ── */
+    .input-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+    .toggle-btn { padding: 7px 20px; border-radius: 20px; border: 1.5px solid var(--border); background: var(--card); color: var(--muted); cursor: pointer; font-size: 0.85rem; transition: all .2s; }
+    .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* ── I/O area ── */
+    .io-area { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 720px) { .io-area { grid-template-columns: 1fr; } }
+    .io-box { display: flex; flex-direction: column; gap: 6px; }
+    .io-box label { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
+
+    textarea { background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'Courier New', monospace; font-size: 0.82rem; padding: 12px; resize: vertical; outline: none; transition: border-color .2s; min-height: 130px; }
+    textarea:focus { border-color: var(--accent); }
+
+    /* hex preview box */
+    .hex-preview { background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 12px; font-family: 'Courier New', monospace; font-size: 0.72rem; color: var(--muted); word-break: break-all; max-height: 60px; overflow-y: auto; line-height: 1.5; transition: border-color .2s; }
+    .hex-preview:not(:empty) { color: var(--accent2); border-color: #2a4a42; }
+    .hex-preview-label { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); margin-bottom: 3px; }
+
+    .dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border: 1.5px dashed var(--border); border-radius: 8px; min-height: 130px; gap: 6px; color: var(--muted); font-size: 0.88rem; transition: all .2s; }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--accent2); background: #1a2e2a; }
+    .dropzone .dz-icon { font-size: 2rem; }
+
+    /* ── Action row ── */
+    .action-row { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+    .action-row .btn { min-width: 148px; padding: 11px 24px; font-size: 1rem; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-text { font-size: 0.82rem; color: var(--muted); }
+
+    /* ── Banner ── */
+    .banner { padding: 11px 15px; border-radius: 8px; font-size: 0.88rem; margin-top: 14px; display: none; }
+    .banner.error   { background: #2d1b1b; border: 1px solid var(--error); color: var(--error); display: block; }
+    .banner.success { background: #1b2d20; border: 1px solid var(--success); color: var(--success); display: block; }
+
+    /* ── Output section ── */
+    .output-section { margin-top: 22px; display: none; }
+    .output-section.visible { display: block; }
+    .output-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+    .output-header h3 { font-size: 1rem; color: var(--accent2); }
+    .result-tabs { display: flex; gap: 5px; }
+    .result-tab { padding: 4px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.78rem; }
+    .result-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .result-view { display: none; }
+    .result-view.active { display: block; }
+    .result-text { background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 12px 14px; font-family: 'Courier New', monospace; font-size: 0.78rem; word-break: break-all; white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+    .copy-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 0.8rem; }
+    .copy-btn:hover { border-color: var(--accent); }
+    .info-bar { font-size: 0.76rem; color: var(--muted); margin-top: 7px; }
+    .download-zone { background: var(--card); border: 1.5px solid var(--border); border-radius: 8px; padding: 20px; text-align: center; display: none; margin-top: 20px; }
+    .download-zone.visible { display: block; }
+    .download-zone p { color: var(--muted); font-size: 0.88rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo-row">
+    <div class="rubik-logo">
+      <!-- Rubik's cube SVG logo -->
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Back faces (darker) -->
+        <polygon points="32,4 56,16 56,40 32,52" fill="#1a1d40" stroke="#6c63ff" stroke-width="1"/>
+        <polygon points="32,4 8,16 8,40 32,52" fill="#151828" stroke="#6c63ff" stroke-width="1"/>
+        <polygon points="8,16 56,16 56,40 8,40" fill="#12162e" stroke="#6c63ff" stroke-width="1"/>
+
+        <!-- Rubik cube front face grid (top face - orange/yellow) -->
+        <!-- Top face: parallelogram -->
+        <polygon points="32,4 56,16 32,28 8,16" fill="#2a2d52" stroke="#6c63ff" stroke-width="1.2"/>
+
+        <!-- Top face cells -->
+        <polygon points="32,4 44,10 32,16 20,10" fill="#ff6b35" opacity=".9" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="44,10 56,16 44,22 32,16" fill="#ffd700" opacity=".85" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="20,10 32,16 20,22 8,16" fill="#00d4aa" opacity=".85" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="32,16 44,22 32,28 20,22" fill="#6c63ff" opacity=".9" stroke="#0d1117" stroke-width=".8"/>
+
+        <!-- Right face cells (3x2 teal/green) -->
+        <polygon points="56,16 56,28 44,34 44,22" fill="#00d4aa" opacity=".75" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="56,28 56,40 44,46 44,34" fill="#6c63ff" opacity=".75" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="44,22 44,34 32,40 32,28" fill="#ff6b35" opacity=".75" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="44,34 44,46 32,52 32,40" fill="#ffd700" opacity=".7" stroke="#0d1117" stroke-width=".8"/>
+
+        <!-- Left face cells (teal/purple) -->
+        <polygon points="8,16 20,22 20,34 8,28" fill="#ffd700" opacity=".7" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="8,28 20,34 20,46 8,40" fill="#ff6b35" opacity=".65" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="20,22 32,28 32,40 20,34" fill="#6c63ff" opacity=".7" stroke="#0d1117" stroke-width=".8"/>
+        <polygon points="20,34 32,40 32,52 20,46" fill="#00d4aa" opacity=".65" stroke="#0d1117" stroke-width=".8"/>
+
+        <!-- Outer border -->
+        <polygon points="32,4 56,16 56,40 32,52 8,40 8,16" fill="none" stroke="#6c63ff" stroke-width="1.8"/>
+      </svg>
+    </div>
+    <div class="logo-text">
+      <h1>RubikCrypt</h1>
+      <div class="tagline">White-Box Cryptography — WBC Family Data Encryption</div>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Algorithm selector -->
+  <div class="algo-rows" id="algoRows">
+    <div class="algo-section-label">Sequential</div>
+    <div class="algo-grid" id="algoGridWBC">
+      {% for algo in algorithms if not algo.parallel %}
+      <div class="algo-card {% if loop.first %}selected{% endif %}"
+           data-id="{{ algo.id }}"
+           data-parallel="{{ 'true' if algo.parallel else 'false' }}"
+           data-enc-modes="{{ algo.enc_modes | join(',') }}"
+           data-algo-modes="{{ algo.algo_modes | join(',') }}"
+           data-has-num-rounds="{{ 'true' if algo.has_num_rounds else 'false' }}"
+           onclick="selectAlgo(this)"
+           title="{{ algo.desc }}">
+        <div class="algo-id">{{ algo.id }}</div>
+        <div class="algo-type">SEQUENTIAL</div>
+        <div class="algo-desc">{{ algo.desc }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="algo-section-label">Parallel (MPI)</div>
+    <div class="algo-grid" id="algoGridPWBC">
+      {% for algo in algorithms if algo.parallel %}
+      <div class="algo-card"
+           data-id="{{ algo.id }}"
+           data-parallel="true"
+           data-enc-modes="{{ algo.enc_modes | join(',') }}"
+           data-algo-modes="{{ algo.algo_modes | join(',') }}"
+           data-has-num-rounds="{{ 'true' if algo.has_num_rounds else 'false' }}"
+           onclick="selectAlgo(this)"
+           title="{{ algo.desc }}">
+        <div class="algo-id">{{ algo.id }}</div>
+        <div class="algo-type">PARALLEL</div>
+        <div class="algo-desc">{{ algo.desc }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Mode tabs -->
+  <div class="tabs">
+    <div class="tab active" id="tab-enc" onclick="switchMode('encrypt')">🔒 Encrypt</div>
+    <div class="tab"        id="tab-dec" onclick="switchMode('decrypt')">🔓 Decrypt</div>
+  </div>
+
+  <!-- Main panel -->
+  <div class="panel">
+
+    <!-- Settings row (enc_mode, algo_mode, nprocs) -->
+    <div class="settings-row" id="settingsRow">
+      <div class="setting-item" id="encModeWrap">
+        <label>Encryption Mode</label>
+        <select id="encModeSelect" onchange="onSettingChange()">
+          <option value="CTR_HMAC" selected>CTR+HMAC (recommended)</option>
+          <option value="ECB">ECB</option>
+          <option value="CBC">CBC</option>
+          <option value="CTR">CTR</option>
+          <option value="OFB">OFB</option>
+          <option value="CFB">CFB</option>
+        </select>
+      </div>
+      <div class="setting-item" id="algoModeWrap" style="display:none;">
+        <label>Algorithm Mode</label>
+        <select id="algoModeSelect" onchange="onSettingChange()">
+          <option value="FULL" selected>FULL (5 operations)</option>
+          <option value="SIMPLIFIED">SIMPLIFIED (2 operations)</option>
+        </select>
+      </div>
+      <div class="setting-item" id="nprocsWrap" style="display:none;">
+        <label>MPI Processes</label>
+        <div class="nprocs-row">
+          <input type="range" id="nprocsRange" min="1" max="8" value="4"
+                 oninput="document.getElementById('nprocsVal').textContent=this.value">
+          <span class="nprocs-val" id="nprocsVal">4</span>
+        </div>
+      </div>
+      <div class="setting-item" id="numRoundsWrap" style="display:none;">
+        <label>PWBC2 Rounds</label>
+        <div class="nprocs-row">
+          <input type="range" id="numRoundsRange" min="1" max="100" value="10"
+                 oninput="document.getElementById('numRoundsVal').textContent=this.value">
+          <span class="nprocs-val" id="numRoundsVal">10</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key section -->
+    <div class="key-section">
+      <label>🔑 Master Key (256 bit = 64 hex characters)</label>
+      <div class="key-row">
+        <input type="text" id="keyInput" placeholder="Enter 64 hex characters or generate a key…"
+               maxlength="64" spellcheck="false" oninput="updateKeyInfo(this.value)">
+        <button class="btn btn-secondary" onclick="generateKey()">⚙ Generate</button>
+        <button class="btn btn-secondary" onclick="copyKey()">📋 Copy</button>
+      </div>
+      <div class="key-info" id="keyInfo">No key set</div>
+    </div>
+
+    <!-- Input type toggle -->
+    <div class="input-toggle">
+      <div class="toggle-btn active" id="toggle-text" onclick="setInputType('text')">📝 Text</div>
+      <div class="toggle-btn"       id="toggle-file" onclick="setInputType('file')">📄 File</div>
+    </div>
+
+    <!-- I/O area -->
+    <div class="io-area">
+      <!-- Text input + hex preview -->
+      <div class="io-box" id="textInputBox">
+        <label id="inputLabel">Plaintext</label>
+        <textarea id="textInput" placeholder="Enter text to encrypt…" rows="6"
+                  oninput="updateInputHex(this.value)"></textarea>
+        <div id="hexPreviewWrap">
+          <div class="hex-preview-label">
+            <span>Input HEX preview</span>
+            <span id="hexPreviewLen"></span>
+          </div>
+          <div class="hex-preview" id="inputHexPreview"></div>
+        </div>
+      </div>
+
+      <!-- File input -->
+      <div class="io-box" id="fileInputBox" style="display:none;">
+        <label>File to Process</label>
+        <div class="dropzone" id="dropzone"
+             onclick="document.getElementById('fileInput').click()"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+          <div class="dz-icon">📄</div>
+          <div id="dzLabel">Drag &amp; drop a file or click to browse</div>
+          <div id="dzInfo" style="font-size:.74rem;"></div>
+        </div>
+        <input type="file" id="fileInput" style="display:none" onchange="onFileSelected()">
+      </div>
+
+      <!-- Output preview -->
+      <div class="io-box" id="outputPlaceholder">
+        <label>Result (preview)</label>
+        <textarea id="outputPreview" readonly placeholder="Result will appear here…" rows="6"></textarea>
+      </div>
+    </div>
+
+    <!-- Action row -->
+    <div class="action-row">
+      <button class="btn btn-primary" id="actionBtn" onclick="runAction()">
+        🔒 Encrypt
+      </button>
+      <div class="spinner" id="spinner"></div>
+      <span class="status-text" id="statusText"></span>
+    </div>
+
+    <div class="banner" id="banner"></div>
+
+    <!-- Encrypted text result -->
+    <div class="output-section" id="textResultSection">
+      <div class="output-header">
+        <h3>✓ Encrypted</h3>
+        <div class="result-tabs">
+          <div class="result-tab active" onclick="switchResultTab('hex')">HEX</div>
+          <div class="result-tab"       onclick="switchResultTab('base64')">Base64</div>
+        </div>
+      </div>
+      <div class="result-view active" id="rv-hex">
+        <div class="result-text" id="resultHex"></div>
+      </div>
+      <div class="result-view" id="rv-base64">
+        <div class="result-text" id="resultBase64"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <button class="copy-btn" onclick="copyResult('hex')">📋 Copy HEX</button>
+        <button class="copy-btn" onclick="copyResult('base64')">📋 Copy Base64</button>
+      </div>
+      <div class="info-bar" id="resultInfo"></div>
+    </div>
+
+    <!-- Decrypted text result -->
+    <div class="output-section" id="decTextSection">
+      <div class="output-header">
+        <h3>✓ Decrypted</h3>
+        <button class="copy-btn" onclick="copyDecText()">📋 Copy</button>
+      </div>
+      <div class="result-text" id="decText" style="font-size:.88rem;"></div>
+      <div class="info-bar" id="decInfo"></div>
+    </div>
+
+    <!-- File download -->
+    <div class="download-zone" id="downloadZone">
+      <p id="downloadDesc">File ready</p>
+      <button class="btn btn-success" onclick="triggerDownload()">⬇ Download File</button>
+    </div>
+
+  </div><!-- /panel -->
+</div><!-- /container -->
+
+<script>
+// ── Algorithm metadata (from Jinja) ──────────────────────────────
+const ALGO_META = {
+  {% for algo in algorithms %}
+  "{{ algo.id }}": {
+    parallel:      {{ 'true' if algo.parallel else 'false' }},
+    enc_modes:     {{ algo.enc_modes | tojson }},
+    algo_modes:    {{ algo.algo_modes | tojson }},
+    has_num_rounds: {{ 'true' if algo.has_num_rounds else 'false' }},
+  },
+  {% endfor %}
+};
+
+// ── State ─────────────────────────────────────────────────────────
+let currentAlgo = '{{ algorithms[0].id }}';
+let currentMode = 'encrypt';
+let inputType   = 'text';
+let selectedFile = null;
+let downloadBlob = null;
+let downloadName = '';
+
+// ── Init ──────────────────────────────────────────────────────────
+(function init() {
+  generateKey();
+  const firstCard = document.querySelector('.algo-card');
+  if (firstCard) updateSettingsFor(firstCard.dataset.id);
+})();
+
+// ── Algo selector ─────────────────────────────────────────────────
+function selectAlgo(el) {
+  document.querySelectorAll('.algo-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  currentAlgo = el.dataset.id;
+  updateSettingsFor(currentAlgo);
+}
+
+function updateSettingsFor(id) {
+  const meta = ALGO_META[id] || {};
+  const isParallel    = meta.parallel;
+  const encModes      = meta.enc_modes   || ['—'];
+  const algoModes     = meta.algo_modes  || [];
+  const hasNumRounds  = meta.has_num_rounds;
+
+  // enc_mode select
+  const encWrap = document.getElementById('encModeWrap');
+  const encSel  = document.getElementById('encModeSelect');
+  const hasModes = encModes.length > 0 && encModes[0] !== '—';
+  encWrap.style.display = hasModes ? '' : 'none';
+  if (hasModes) {
+    encSel.innerHTML = encModes.map(m =>
+      `<option value="${m}">${encModeLabel(m)}</option>`
+    ).join('');
+  }
+
+  // algo_mode select (PWBC2.1 = FULL/SIMPLIFIED, PWBC1 = shift_mode 0/1/2)
+  const algoWrap = document.getElementById('algoModeWrap');
+  const algoSel  = document.getElementById('algoModeSelect');
+  algoWrap.style.display = algoModes.length > 0 ? '' : 'none';
+  if (algoModes.length) {
+    algoSel.innerHTML = algoModes.map(m =>
+      `<option value="${m}">${algoModeLabel(m)}</option>`
+    ).join('');
+  }
+
+  // nprocs slider
+  document.getElementById('nprocsWrap').style.display    = isParallel ? '' : 'none';
+  // num_rounds slider (PWBC2 only)
+  document.getElementById('numRoundsWrap').style.display = hasNumRounds ? '' : 'none';
+}
+
+function encModeLabel(m) {
+  const labels = {
+    CTR_HMAC: 'CTR+HMAC (recommended)',
+    ECB: 'ECB', CBC: 'CBC', CTR: 'CTR', OFB: 'OFB', CFB: 'CFB',
+  };
+  return labels[m] || m;
+}
+
+function algoModeLabel(m) {
+  const labels = {
+    'FULL':       'FULL (5 operations)',
+    'SIMPLIFIED': 'SIMPLIFIED (2 operations)',
+    '0': 'Shift #0 — Baseline',
+    '1': 'Shift #1 — Uniform key-byte',
+    '2': 'Shift #2 — Alpha+Beta (trade-off)',
+  };
+  return labels[m] || m;
+}
+
+function onSettingChange() { /* handled in runAction */ }
+
+// ── Mode tabs ─────────────────────────────────────────────────────
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('tab-enc').classList.toggle('active', mode === 'encrypt');
+  document.getElementById('tab-dec').classList.toggle('active', mode === 'decrypt');
+  document.getElementById('actionBtn').textContent = mode === 'encrypt' ? '🔒 Encrypt' : '🔓 Decrypt';
+  document.getElementById('inputLabel').textContent = mode === 'encrypt' ? 'Plaintext' : 'Ciphertext (HEX)';
+  document.getElementById('textInput').placeholder = mode === 'encrypt'
+    ? 'Enter text to encrypt…'
+    : 'Paste HEX string of encrypted data…';
+  // hex preview: show for plaintext, hide for ciphertext input (decrypt)
+  document.getElementById('hexPreviewWrap').style.display = mode === 'encrypt' ? '' : 'none';
+  clearResults();
+}
+
+// ── Input type ────────────────────────────────────────────────────
+function setInputType(t) {
+  inputType = t;
+  document.getElementById('toggle-text').classList.toggle('active', t === 'text');
+  document.getElementById('toggle-file').classList.toggle('active', t === 'file');
+  document.getElementById('textInputBox').style.display  = t === 'text' ? '' : 'none';
+  document.getElementById('fileInputBox').style.display  = t === 'file' ? '' : 'none';
+  document.getElementById('outputPlaceholder').style.display = t === 'text' ? '' : 'none';
+  clearResults();
+}
+
+// ── Hex preview of input ──────────────────────────────────────────
+function updateInputHex(text) {
+  const preview = document.getElementById('inputHexPreview');
+  const lenEl   = document.getElementById('hexPreviewLen');
+  if (!text) { preview.textContent = ''; lenEl.textContent = ''; return; }
+  const bytes = new TextEncoder().encode(text);
+  lenEl.textContent = bytes.length + ' bytes';
+  const hexStr = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  preview.textContent = hexStr;
+}
+
+// ── Key management ────────────────────────────────────────────────
+async function generateKey() {
+  const r = await fetch('/api/generate-key');
+  const d = await r.json();
+  document.getElementById('keyInput').value = d.key;
+  updateKeyInfo(d.key);
+}
+function updateKeyInfo(v) {
+  const el = document.getElementById('keyInfo');
+  if (!v) { el.textContent = 'No key set'; el.style.color = 'var(--muted)'; return; }
+  if (v.length !== 64) {
+    el.textContent = `${v.length}/64 characters — need 64 hex characters`;
+    el.style.color = 'var(--error)';
+  } else if (/^[0-9a-fA-F]{64}$/.test(v)) {
+    el.textContent = '✓ 256-bit key';
+    el.style.color = 'var(--success)';
+  } else {
+    el.textContent = 'Invalid characters';
+    el.style.color = 'var(--error)';
+  }
+}
+function copyKey() {
+  const v = document.getElementById('keyInput').value;
+  if (v) navigator.clipboard.writeText(v).then(() => flashStatus('Key copied'));
+}
+
+// ── Drag-drop ─────────────────────────────────────────────────────
+function onFileSelected() { const f = document.getElementById('fileInput').files[0]; if (f) { selectedFile = f; updateDropzone(f); } }
+function updateDropzone(f) { document.getElementById('dzLabel').textContent = f.name; document.getElementById('dzInfo').textContent = formatSize(f.size); }
+function onDragOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('dragover'); }
+function onDragLeave()  { document.getElementById('dropzone').classList.remove('dragover'); }
+function onDrop(e) { e.preventDefault(); document.getElementById('dropzone').classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f) { selectedFile = f; updateDropzone(f); } }
+function formatSize(n) { if (n < 1024) return n + ' B'; if (n < 1048576) return (n/1024).toFixed(1) + ' KB'; return (n/1048576).toFixed(1) + ' MB'; }
+
+// ── Main action ───────────────────────────────────────────────────
+async function runAction() {
+  clearResults();
+  document.getElementById('banner').className = 'banner';
+
+  const key = document.getElementById('keyInput').value.trim().toLowerCase();
+  if (key.length !== 64 || !/^[0-9a-f]{64}$/.test(key)) {
+    showBanner('Enter a valid 256-bit key (64 hex characters)', 'error'); return;
+  }
+  if (inputType === 'file' && !selectedFile) {
+    showBanner('Select a file', 'error'); return;
+  }
+
+  const encMode   = document.getElementById('encModeSelect').value  || 'CTR_HMAC';
+  const algoMode  = document.getElementById('algoModeSelect').value || '0';
+  const nprocs    = document.getElementById('nprocsRange').value    || '4';
+  const numRounds = document.getElementById('numRoundsRange').value || '10';
+
+  setLoading(true);
+
+  const fd = new FormData();
+  fd.append('algorithm',  currentAlgo);
+  fd.append('key',        key);
+  fd.append('enc_mode',   encMode);
+  fd.append('algo_mode',  algoMode);
+  fd.append('nprocs',     nprocs);
+  fd.append('num_rounds', numRounds);
+  fd.append('input_type', inputType);
+
+  const endpoint = currentMode === 'encrypt' ? '/api/encrypt' : '/api/decrypt';
+
+  try {
+    if (inputType === 'text') {
+      const txt = document.getElementById('textInput').value;
+
+      if (currentMode === 'decrypt') {
+        // parse hex → binary, send as file
+        const cleaned = txt.trim().replace(/\s+/g, '');
+        let binData;
+        if (/^[0-9a-fA-F]+$/.test(cleaned) && cleaned.length % 2 === 0) {
+          binData = new Uint8Array(cleaned.match(/.{2}/g).map(h => parseInt(h, 16)));
+        } else {
+          binData = new TextEncoder().encode(txt);
+        }
+        const blob = new Blob([binData], { type: 'application/octet-stream' });
+        fd.append('file_input', blob, 'data.bin');
+        fd.set('input_type', 'file_text_decrypt');
+        const r = await fetch(endpoint, { method: 'POST', body: fd });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({ error: 'Server error' }));
+          showBanner(d.error || 'Error', 'error');
+        } else {
+          const arr = await r.arrayBuffer();
+          const dec = new TextDecoder('utf-8').decode(arr);
+          showDecText(dec, arr.byteLength);
+        }
+      } else {
+        fd.append('text_input', txt);
+        const r = await fetch(endpoint, { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok || d.error) { showBanner(d.error || 'Error', 'error'); }
+        else { showTextResult(d.hex, d.base64, d.length); }
+      }
+
+    } else {
+      fd.append('file_input', selectedFile, selectedFile.name);
+      const r = await fetch(endpoint, { method: 'POST', body: fd });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({ error: 'Server error' }));
+        showBanner(d.error || 'Server error', 'error');
+      } else {
+        const blob = await r.blob();
+        const cd   = r.headers.get('Content-Disposition') || '';
+        const m    = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        downloadName = m ? m[1].replace(/['"]/g,'') : (
+          currentMode === 'encrypt'
+            ? selectedFile.name + '.rubikcrypt'
+            : selectedFile.name.replace(/\.rubikcrypt$/, '')
+        );
+        downloadBlob = blob;
+        showDownload(downloadName, blob.size);
+      }
+    }
+  } catch(e) {
+    showBanner('Network error: ' + e.message, 'error');
+  }
+
+  setLoading(false);
+}
+
+// ── Result helpers ────────────────────────────────────────────────
+function showTextResult(hex, b64, bytes) {
+  document.getElementById('resultHex').textContent    = hex;
+  document.getElementById('resultBase64').textContent = b64;
+  document.getElementById('resultInfo').textContent   = `${bytes} bytes`;
+  document.getElementById('textResultSection').classList.add('visible');
+  document.getElementById('outputPreview').value = hex;
+}
+function showDecText(text, bytes) {
+  document.getElementById('decText').textContent = text;
+  document.getElementById('decInfo').textContent = `${bytes} bytes`;
+  document.getElementById('decTextSection').classList.add('visible');
+  document.getElementById('outputPreview').value = text;
+}
+function showDownload(name, size) {
+  document.getElementById('downloadDesc').textContent = `Ready: ${name} (${formatSize(size)})`;
+  document.getElementById('downloadZone').classList.add('visible');
+}
+function triggerDownload() {
+  if (!downloadBlob) return;
+  const url = URL.createObjectURL(downloadBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = downloadName; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function clearResults() {
+  document.getElementById('textResultSection').classList.remove('visible');
+  document.getElementById('decTextSection').classList.remove('visible');
+  document.getElementById('downloadZone').classList.remove('visible');
+  document.getElementById('outputPreview').value = '';
+  downloadBlob = null;
+}
+function switchResultTab(id) {
+  document.querySelectorAll('.result-tab').forEach((t, i) => {
+    t.classList.toggle('active', ['hex','base64'][i] === id);
+  });
+  document.getElementById('rv-hex').classList.toggle('active', id === 'hex');
+  document.getElementById('rv-base64').classList.toggle('active', id === 'base64');
+}
+function copyResult(id) {
+  const el = document.getElementById(id === 'hex' ? 'resultHex' : 'resultBase64');
+  navigator.clipboard.writeText(el.textContent).then(() => flashStatus('Copied!'));
+}
+function copyDecText() {
+  navigator.clipboard.writeText(document.getElementById('decText').textContent)
+    .then(() => flashStatus('Copied!'));
+}
+
+// ── Utilities ─────────────────────────────────────────────────────
+function setLoading(on) {
+  document.getElementById('spinner').style.display = on ? 'block' : 'none';
+  document.getElementById('actionBtn').disabled    = on;
+  document.getElementById('statusText').textContent = on ? 'Processing…' : '';
+}
+function showBanner(msg, type) {
+  const el = document.getElementById('banner');
+  el.textContent = msg;
+  el.className   = 'banner ' + type;
+}
+function flashStatus(msg) {
+  document.getElementById('statusText').textContent = msg;
+  setTimeout(() => { document.getElementById('statusText').textContent = ''; }, 2000);
+}
+</script>
+</body>
+</html>
